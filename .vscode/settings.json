@@ -1,0 +1,40 @@
+{
+  // ===== BranchBoard – konfiguracja dla projektu "Leniwiec" (Git przez SSH) =====
+
+  // Nazwa / tytuł tablicy
+  "branchBoard.projectName": "Leniwiec",
+  "branchBoard.boardTitle": "LENIWIEC",
+
+  // Dane lokalnie w repo (możesz commitować, by dzielić tablicę z zespołem)
+  "branchBoard.storageMode": "workspace-json",
+  "branchBoard.localDataFile": ".branchboard/board.json",
+
+  // Tryb server – wyłączony (SSH nie potrzebuje tokenu, używa Twojego klucza)
+  "branchBoard.serverUrl": "",
+  "branchBoard.authToken": "",
+
+  // Git
+  "branchBoard.defaultMainBranch": "main",
+  "branchBoard.remoteName": "origin",
+
+  // Użytkownik wykrywany z `git config user.name` / `user.email`
+  "branchBoard.autoDetectGitUser": true,
+  "branchBoard.currentUser": "",
+
+  // Odświeżanie / sync
+  "branchBoard.syncIntervalSeconds": 20,
+
+  // ===== Bezpieczeństwo i flow "Zakończ zadanie" =====
+  // Pełny, wygodny flow solo: Finish task pushuje, merge'uje do main i sprząta branch
+  "branchBoard.allowDirectMergeToMain": true,
+  // ...ale ZAWSZE pyta o potwierdzenie przed merge (zostaw na true)
+  "branchBoard.requireConfirmationBeforeMerge": true,
+  // Nie zamknie zadania, jeśli masz niezacommitowane zmiany
+  "branchBoard.requireCleanWorkingTreeBeforeFinish": true,
+  // Opcjonalna komenda przed zakończeniem (np. build) – pusta = pomijana
+  "branchBoard.runCommandBeforeFinish": "",
+
+  // Sprzątanie brancha po UDANYM merge (działa też po SSH)
+  "branchBoard.deleteLocalBranchAfterMerge": true,
+  "branchBoard.deleteRemoteBranchAfterMerge": true
+}

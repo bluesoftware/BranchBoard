@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "projectName": "Leniwiec",
+  "boardTitle": "LENIWIEC",
+  "updatedAt": "2026-06-06T01:24:49.706Z",
+  "columns": [
+    {
+      "id": "app-sklep",
+      "name": "APP SKLEP",
+      "position": 1
+    },
+    {
+      "id": "app-start",
+      "name": "APP START",
+      "position": 2
+    },
+    {
+      "id": "koszyk",
+      "name": "KOSZYK",
+      "position": 3
+    },
+    {
+      "id": "konto",
+      "name": "KONTO",
+      "position": 4
+    },
+    {
+      "id": "do-testu",
+      "name": "DO TESTU",
+      "position": 5
+    },
+    {
+      "id": "done",
+      "name": "ZROBIONE",
+      "position": 99
+    }
+  ],
+  "users": [
+    {
+      "id": "darek",
+      "name": "Darek",
+      "email": "",
+      "avatarText": "DK",
+      "color": "#38bdf8"
+    },
+    {
+      "id": "hania",
+      "name": "Hania",
+      "email": "",
+      "avatarText": "HA",
+      "color": "#f472b6"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task_mq1o5tnc_mwjy",
+      "title": "TEST",
+      "description": "TEST",
+      "columnId": "app-sklep",
+      "position": 1,
+      "assignedUserId": "darek",
+      "branchName": "feature/c_mwjy-test",
+      "comments": [
+        {
+          "id": "c_mq1o7r8q",
+          "authorId": "darek",
+          "text": "TEST",
+          "createdAt": "2026-06-06T01:24:49.706Z"
+        }
+      ],
+      "checklist": [],
+      "createdAt": "2026-06-06T01:23:19.512Z",
+      "updatedAt": "2026-06-06T01:24:49.706Z",
+      "finishedAt": null,
+      "status": "open"
+    }
+  ]
+}

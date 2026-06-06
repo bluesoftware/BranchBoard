@@ -1,0 +1,220 @@
+{
+  "name": "branchboard",
+  "displayName": "BranchBoard",
+  "description": "Git-connected Kanban board for small development teams, inside VS Code / Cursor.",
+  "version": "0.1.0",
+  "publisher": "branchboard",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Other",
+    "SCM Providers"
+  ],
+  "keywords": [
+    "kanban",
+    "git",
+    "board",
+    "branch",
+    "team"
+  ],
+  "main": "./out/extension.js",
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "branchBoard",
+          "title": "BranchBoard",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "branchBoard": [
+        {
+          "id": "branchBoard.boardView",
+          "name": "Board",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "branchBoard.openBoard",
+        "title": "BranchBoard: Open Board",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "branchBoard.createTask",
+        "title": "BranchBoard: Create Task",
+        "icon": "$(add)"
+      },
+      {
+        "command": "branchBoard.refreshBoard",
+        "title": "BranchBoard: Refresh Board",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "branchBoard.syncNow",
+        "title": "BranchBoard: Sync Now",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "branchBoard.checkoutTaskBranch",
+        "title": "BranchBoard: Checkout Task Branch"
+      },
+      {
+        "command": "branchBoard.finishTask",
+        "title": "BranchBoard: Finish Task"
+      },
+      {
+        "command": "branchBoard.configure",
+        "title": "BranchBoard: Configure"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "branchBoard.openBoard",
+          "when": "view == branchBoard.boardView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "branchBoard.createTask",
+          "when": "view == branchBoard.boardView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "branchBoard.refreshBoard",
+          "when": "view == branchBoard.boardView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "branchBoard.syncNow",
+          "when": "view == branchBoard.boardView",
+          "group": "navigation@4"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "BranchBoard",
+      "properties": {
+        "branchBoard.projectName": {
+          "type": "string",
+          "default": "BranchBoard",
+          "description": "Project name shown in the board data file."
+        },
+        "branchBoard.boardTitle": {
+          "type": "string",
+          "default": "BranchBoard",
+          "description": "Title displayed at the top of the board."
+        },
+        "branchBoard.storageMode": {
+          "type": "string",
+          "enum": [
+            "workspace-json",
+            "server"
+          ],
+          "default": "workspace-json",
+          "description": "Where board data is stored. 'workspace-json' keeps a local JSON file. 'server' uses a remote API (preview)."
+        },
+        "branchBoard.localDataFile": {
+          "type": "string",
+          "default": ".branchboard/board.json",
+          "description": "Path (relative to the workspace root) to the local board JSON file."
+        },
+        "branchBoard.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL of the BranchBoard server (used when storageMode = 'server')."
+        },
+        "branchBoard.authToken": {
+          "type": "string",
+          "default": "",
+          "description": "Authentication token for the BranchBoard server."
+        },
+        "branchBoard.defaultMainBranch": {
+          "type": "string",
+          "default": "main",
+          "description": "Name of the main branch used for merges."
+        },
+        "branchBoard.remoteName": {
+          "type": "string",
+          "default": "origin",
+          "description": "Name of the Git remote used for push / pull operations."
+        },
+        "branchBoard.autoDetectGitUser": {
+          "type": "boolean",
+          "default": true,
+          "description": "Try to detect the current user from git config user.name / user.email."
+        },
+        "branchBoard.currentUser": {
+          "type": "string",
+          "default": "",
+          "description": "Id of the current board user (overrides auto-detection when set)."
+        },
+        "branchBoard.availableUsers": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object"
+          },
+          "description": "Optional list of users to seed into a new board.json file."
+        },
+        "branchBoard.syncIntervalSeconds": {
+          "type": "number",
+          "default": 20,
+          "description": "How often (seconds) to poll for external changes / server sync."
+        },
+        "branchBoard.allowDirectMergeToMain": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow the 'Finish task' flow to merge directly into the main branch."
+        },
+        "branchBoard.requireConfirmationBeforeMerge": {
+          "type": "boolean",
+          "default": true,
+          "description": "Always ask for explicit confirmation before merging into main."
+        },
+        "branchBoard.requireCleanWorkingTreeBeforeFinish": {
+          "type": "boolean",
+          "default": true,
+          "description": "Refuse to finish a task while there are uncommitted changes."
+        },
+        "branchBoard.runCommandBeforeFinish": {
+          "type": "string",
+          "default": "",
+          "description": "Optional shell command (e.g. 'npm run build') to run before finishing a task. Finish is aborted if it fails."
+        },
+        "branchBoard.deleteRemoteBranchAfterMerge": {
+          "type": "boolean",
+          "default": false,
+          "description": "Delete the remote task branch after a successful merge to main."
+        },
+        "branchBoard.deleteLocalBranchAfterMerge": {
+          "type": "boolean",
+          "default": false,
+          "description": "Delete the local task branch after a successful merge to main."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build:all",
+    "build:all": "npm run build:webview && npm run compile",
+    "build:webview": "cd webview && npm install && npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "echo \"(no linter configured)\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.84.0",
+    "typescript": "^5.4.0"
+  }
+}
