@@ -1,202 +1,219 @@
 # BranchBoard
 
-A Git-connected Kanban board that lives inside VS Code / Cursor. Built for small
-development teams: every task can be tied to a Git branch, and the board can
-create, switch, push, and safely finish branches without leaving the editor.
+**Git-connected Kanban for VS Code and Cursor. One task. One branch. One workflow.**
 
-The board is a dark, Todoist-style layout — horizontal columns, rounded task
-cards, column counters, assignee avatars, comment counts, and a "+ Dodaj
-zadanie" button under every column.
+> Do not manage tasks next to your code. Manage tasks where code happens.
 
-## What it does
+BranchBoard connects the task board with the actual Git branch, so your team
+always knows who works on what, where the code is, and what is ready to review —
+without leaving the editor.
 
-- **Kanban board in a WebView** (React + Vite, bundled locally — no external CDNs).
-- **Activity Bar icon** opens the board in the sidebar; `BranchBoard: Open Board`
-  opens it as a wide editor panel.
-- **Tasks**: create, edit, describe, assign, comment, check off, drag between and
-  within columns, delete (with confirmation).
-- **Columns**: add, rename (double-click the title or use the `⋯` menu), delete
-  empty columns, reorder by dragging the column header.
-- **Git integration** per task: create branch, checkout, push, finish task, and
-  (optionally) merge to main and clean up the branch.
-- **User switcher**: My tasks / All tasks / per-user filtering. The current user
-  is auto-detected from `git config user.name` / `user.email`.
-- **Local JSON storage** at `.branchboard/board.json`, created automatically. A
-  file watcher reloads the board when the file changes externally.
-- **Notifications** when a task is assigned to you, when a comment is added to
-  your task, or when a task moves into a review/done column.
-- **Server mode** is stubbed behind a `StorageProvider` interface, ready to be
-  implemented later (see "Future server mode").
+---
 
-## Project layout
+## Why BranchBoard?
 
+Most boards live in a browser tab, far away from the code. BranchBoard lives
+inside VS Code / Cursor and treats the **task and its Git branch as one unit**.
+From a card you can create a branch, switch to it, push it, and safely finish the
+work — with guardrails that never merge to `main` or delete branches without your
+explicit confirmation.
+
+It is intentionally lightweight: not a Jira replacement, not heavy project
+management. Fast, elegant, and directly tied to your repository.
+
+## Who is it for?
+
+- Small development teams (2–10 people)
+- Freelancers and software houses
+- Teams working in Cursor and with AI coding agents
+- Teams that don't want heavy Jira
+- Projects where every task should have a branch
+- Legacy projects with many small fixes
+
+## How it works
+
+1. Open a repository in VS Code / Cursor.
+2. Open the BranchBoard view from the Activity Bar.
+3. Create a task. BranchBoard suggests a safe branch name (`feature/task-…`).
+4. Create the branch from the card, check it out, and start coding.
+5. When you're done, **Finish task** pushes the branch and moves the card forward
+   — merging to `main` only if you allow it and confirm.
+
+## Core workflow
+
+Each task carries a title, description, assignee, priority, status, comments,
+a checklist, and a linked Git branch. The board shows columns with counters,
+rounded cards, avatars, branch badges, comment counts, and priority — with drag
+and drop between and within columns.
+
+Git actions available per task: **Create branch · Checkout · Push · Copy branch
+name · Finish task · Merge to main** (when enabled).
+
+## Command Center (CTO view)
+
+Beyond the board, BranchBoard ships a **Command Center / Centrum dowodzenia** — a
+lightweight engineering command center for a senior / CTO leading a small team.
+Open it from the top-bar button or the `BranchBoard: Open Command Center` command.
+
+It shows what is happening with the code, not just the to-do list: an **Overview**
+with KPI tiles and an automatic "needs attention" list, a **Team** workload view
+(built to spot bottlenecks, not judge people), a visual **Branch Flow** pipeline
+(Task → Branch → Commits → Push → DEV → Review → Testing → Merge) with risk and
+freshness badges, and an **Activity** timeline. It also covers DEV/production
+deployments and safe rollback. All git analytics are read-only and network-free.
+
+It is built to bring **order to the project, not to track hours** — the team view
+literally states "this view helps detect bottlenecks, not judge people". Leads get
+visibility that builds trust instead of eroding it: you see progress without having
+to ask for status. See the senior/CTO guide in
+[docs/CTO_WORKFLOW.md](docs/CTO_WORKFLOW.md), plus
+[COMMAND_CENTER.md](docs/COMMAND_CENTER.md), [DEPLOYMENTS.md](docs/DEPLOYMENTS.md)
+and [ROLLBACK_SAFETY.md](docs/ROLLBACK_SAFETY.md).
+
+## Branch Map / Mapa branchy
+
+Branch Map visualizes the real flow of work in your repository. It connects Git
+branches with tasks, owners, commits, changed files, DEV deploys, AI assistance
+and risk signals. It helps small teams understand what is happening in the
+codebase without switching between Git tools, project boards and chat.
+
+Mapa branchy pokazuje realny przepływ pracy w repozytorium: branche, zadania,
+osoby, commity, zmienione pliki, deploy na DEV, pracę AI oraz ryzyka. Dzięki temu
+lider techniczny widzi, co naprawdę dzieje się w projekcie. See
+[docs/BRANCH_MAP.md](docs/BRANCH_MAP.md).
+
+## Current branch / Aktualny branch
+
+The "Current branch" view shows everything known about the current work: branch,
+linked task, changed files, commits, Git status, risk, DEV deploy and the
+suggested next step. It helps developers move work forward without searching for
+the task on the board.
+
+Widok „Aktualny branch" pokazuje wszystko, co wiadomo o bieżącej pracy: branch,
+powiązane zadanie, zmienione pliki, commity, status Git, ryzyko, deploy DEV i
+sugerowany następny krok. See [docs/CURRENT_BRANCH.md](docs/CURRENT_BRANCH.md).
+
+Top navigation switches between **Board · Current branch · Command Center · Branch
+Map · Settings**, all sharing the same `board.json` / server data.
+
+The Command Center's **Branch Flow** tab is an operational panel for managing
+branches as tasks: categories (local-only, remote-only, backup, stale, cleanup,
+high risk), filters, quick actions (checkout, open/create/link task, push, DEV),
+bulk selection, and safe archive/delete (local + remote) with confirmations. See
+[docs/BRANCH_FLOW.md](docs/BRANCH_FLOW.md).
+
+BranchBoard is **help-first**: Git, risk and deploy concepts are explained in
+plain language via tooltips, in Polish and English. See
+[docs/TOOLTIPS_AND_HELP.md](docs/TOOLTIPS_AND_HELP.md).
+
+## AI coding workflow
+
+Every task has a **Copy AI Prompt** button. It generates a ready-to-paste prompt
+for Cursor, Claude or Copilot Chat containing the title, description, branch,
+project name, acceptance criteria, checklist, comments summary and your test
+command — plus rules that tell the agent to inspect the code first, make a plan,
+change only what's needed, and keep commits focused. The template is fully
+editable in Settings.
+
+See [docs/AI_WORKFLOW.md](docs/AI_WORKFLOW.md).
+
+## Git safety
+
+BranchBoard never merges to `main` or deletes a branch without explicit
+confirmation, and never marks a task done if a Git operation failed. Clean
+working-tree checks, a configurable pre-finish command, and conflict-aware merges
+are built in. See [docs/SAFETY.md](docs/SAFETY.md).
+
+## Languages / Języki
+
+BranchBoard runs in **Polish by default** and can switch to **English** in
+Settings → Appearance → Language (or the `branchBoard.language` setting). UI
+strings live in `webview/src/i18n/pl.json` and `webview/src/i18n/en.json`, so
+adding another language is just a new file.
+
+Dostępne języki: **Polski**, **English**.
+
+## Installation
+
+Install from a packaged `.vsix`:
+
+```bash
+code --install-extension branchboard-0.2.0.vsix
 ```
-package.json                         Extension manifest (commands, settings, views)
-tsconfig.json
-README.md
-media/icon.svg                       Activity Bar icon
-src/
-  extension.ts                       Activation, commands, wiring, sync timer
-  types.ts                           Shared data model + message protocol
-  panel/BoardPanel.ts                WebView host, panel + sidebar providers, message handling
-  services/
-    GitService.ts                    Safe git CLI wrapper + finishTaskGitFlow
-    BoardService.ts                  In-memory board, mutations, persistence, notifications
-    StorageProvider.ts               Storage interface + default board factory
-    LocalJsonStorageProvider.ts      .branchboard/board.json + file watcher (MVP)
-    ServerStorageProvider.ts         Stub for future backend
-webview/                             React + Vite UI (separate build)
-  package.json, vite.config.ts, tsconfig.json, index.html
-  src/
-    main.tsx, App.tsx, types.ts, vscode.ts, styles.css
-    components/
-      TopBar.tsx, Board.tsx, Column.tsx, TaskCard.tsx, TaskModal.tsx, UserSwitcher.tsx
-```
+
+…or run from source (see below) and press `F5`.
 
 ## Development setup
 
-You need Node.js 18+ and VS Code 1.84+.
-
 ```bash
-# 1. Install extension dependencies
 npm install
-
-# 2. Build the WebView UI (installs its own deps + produces webview/dist)
 cd webview
 npm install
 npm run build
 cd ..
-
-# 3. Compile the extension TypeScript
 npm run compile
 ```
 
-Then press **F5** in VS Code to launch an Extension Development Host with
-BranchBoard loaded. Open a folder that is a Git repository, click the
-BranchBoard icon in the Activity Bar, or run **BranchBoard: Open Board**.
+Then press `F5` in VS Code to launch the Extension Development Host.
 
-While developing, you can keep the extension compiler running:
-
-```bash
-npm run watch
-```
-
-and rebuild the WebView (`cd webview && npm run build`) whenever you change UI
-files. A full one-shot build is available via:
-
-```bash
-npm run build:all   # builds webview + compiles extension
-```
-
-## Packaging a VSIX
+Package a VSIX:
 
 ```bash
 npm install -g @vscode/vsce
 vsce package
 ```
 
-`vsce package` runs `vscode:prepublish`, which builds the WebView and compiles
-the extension, then produces `branchboard-<version>.vsix`. Install it with
-`code --install-extension branchboard-0.1.0.vsix` or via the Extensions view
-"Install from VSIX…" command.
-
 ## Settings
 
-All settings live under `branchBoard.*` (Settings → search "BranchBoard"):
+Key settings (all under `branchBoard.*`, editable in the in-app Settings drawer):
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `projectName` | `BranchBoard` | Project name stored in the data file. |
-| `boardTitle` | `BranchBoard` | Title shown at the top of the board. |
-| `storageMode` | `workspace-json` | `workspace-json` (local file) or `server` (preview). |
-| `localDataFile` | `.branchboard/board.json` | Path to the local board file. |
-| `serverUrl` | `` | Base URL for server mode. |
-| `authToken` | `` | Bearer token for server mode. |
-| `defaultMainBranch` | `main` | Branch merges target. |
-| `remoteName` | `origin` | Remote used for push/pull. |
-| `autoDetectGitUser` | `true` | Match the current user from git config. |
-| `currentUser` | `` | Force a specific board user id. |
-| `availableUsers` | `[]` | Users to seed into a new board file. |
-| `syncIntervalSeconds` | `20` | External-change poll interval (mainly server mode). |
-| `allowDirectMergeToMain` | `false` | Allow Finish task to merge into main. |
-| `requireConfirmationBeforeMerge` | `true` | Always confirm before merging. |
-| `requireCleanWorkingTreeBeforeFinish` | `true` | Block finishing with uncommitted changes. |
-| `runCommandBeforeFinish` | `` | e.g. `npm run build`; finish aborts if it fails. |
-| `deleteRemoteBranchAfterMerge` | `false` | Delete remote branch after a successful merge. |
-| `deleteLocalBranchAfterMerge` | `false` | Delete local branch after a successful merge. |
+- `language` — `pl` (default) or `en`
+- `boardTitle`, `projectName`
+- `storageMode` — `workspace-json` (default) or `server`
+- `localDataFile` — default `.branchboard/board.json`
+- `defaultMainBranch` (`main`), `remoteName` (`origin`)
+- `allowDirectMergeToMain` (default `false`)
+- `requireConfirmationBeforeMerge` (default `true`)
+- `requireCleanWorkingTreeBeforeFinish` (default `true`)
+- `runCommandBeforeFinish` — e.g. `npm run build`
+- `deleteLocalBranchAfterMerge`, `deleteRemoteBranchAfterMerge`
+- `aiPromptTemplate` — custom AI prompt template
+- `appearance.*` — compact mode, badges, comments, checklist, avatars, priority, reduced animations
 
-## Git safety notes
+## Local JSON mode
 
-BranchBoard never does anything destructive silently:
+By default the board is stored in `.branchboard/board.json` inside the workspace.
+The file is created automatically, watched for external edits, migrated across
+schema versions, and backed up to `board.backup.json` before each write so a
+corrupted file never destroys your data.
 
-- The `git` CLI is invoked with `execFile` (no shell), and branch names are
-  validated with `git check-ref-format` before use, so task data cannot inject
-  commands.
-- **Merging to main is off by default** (`allowDirectMergeToMain: false`). When
-  off, Finish task only pushes the branch and moves the card for review.
-- When direct merge is on, you are still asked to confirm before the merge runs
-  (`requireConfirmationBeforeMerge`).
-- **Finishing is blocked** while the working tree is dirty (unless you turn
-  `requireCleanWorkingTreeBeforeFinish` off).
-- On a **merge conflict**, the merge is aborted automatically, the task is *not*
-  closed, and the branch is *not* deleted.
-- Branches are only deleted after a fully successful merge **and** push, and only
-  if you opted in via the delete-after-merge settings.
-- GitHub CLI is never required — everything works on a plain Git remote.
+## Server mode preview
 
-### Finish task flow
+A `ServerStorageProvider` (SSH + SQLite) is wired through the same
+`StorageProvider` interface as a preview for shared, real-time boards. Local JSON
+mode is the supported MVP today.
 
-1. Verify the task has a branch name.
-2. Verify the working tree is clean (if required) — otherwise stop.
-3. Ensure the task branch is checked out.
-4. Run `runCommandBeforeFinish` if configured — stop on failure.
-5. `git push origin <branch>`.
-6. If direct merge is **disabled**: move the card to the review/done column, done.
-7. If direct merge is **enabled**: confirm → checkout main → pull → merge →
-   push main → optional branch cleanup → mark done + set `finishedAt` → move to
-   ZROBIONE.
+## Roadmap
 
-## Data file
+- Real-time multi-user server mode (SQLite + WebSocket sync)
+- Per-board column WIP limits
+- Pull-request integration
+- More languages
 
-`.branchboard/board.json` is created on first run. Shape:
+---
 
-```json
-{
-  "version": 1,
-  "projectName": "BranchBoard",
-  "boardTitle": "BranchBoard",
-  "columns": [{ "id": "app-sklep", "name": "APP SKLEP", "position": 1 }],
-  "users": [{ "id": "darek", "name": "Darek", "email": "", "avatarText": "DK", "color": "#38bdf8" }],
-  "tasks": []
-}
-```
+## Opis po polsku
 
-It is safe to commit this file so the whole team shares the same board, or to
-gitignore it for a personal board.
+BranchBoard to tablica Kanban dla programistów, która działa bezpośrednio w
+VS Code i Cursorze. Każde zadanie może mieć przypisany branch Git, osobę
+odpowiedzialną, komentarze, priorytet, listę zadań i bezpieczny flow zakończenia
+pracy. BranchBoard łączy tablicę zadań z prawdziwym branchem Git, więc zespół
+zawsze wie, kto nad czym pracuje, gdzie jest kod i co jest gotowe do review.
 
-## Future server mode
+Interfejs domyślnie działa po polsku; język można zmienić na angielski w
+ustawieniach (`branchBoard.language`). BranchBoard nigdy nie scala do `main` ani
+nie usuwa brancha bez wyraźnego potwierdzenia.
 
-The architecture is ready for a VPS backend. `ServerStorageProvider` documents
-the exact contract the server must implement:
+## License
 
-- `GET  {serverUrl}/api/board` → `BoardData`
-- `PUT  {serverUrl}/api/board` ← `BoardData`
-- `WS   {serverUrl}/ws` → `{ type: "board", data }` push for real-time sync
-- Auth via `Authorization: Bearer {authToken}`
-
-A reference backend would use **Node.js + SQLite + WebSocket** with token login.
-Because all storage goes through the `StorageProvider` interface, switching
-`branchBoard.storageMode` to `server` is the only change the rest of the
-extension needs.
-
-## What's implemented vs. left for later
-
-**Implemented (working MVP):** activity bar + editor board, local JSON storage
-with auto-create and file watcher, full task CRUD, columns CRUD + reorder, drag
-and drop (within and across columns), user detection and filtering, comments,
-all GitService operations, the safe finish-task flow, VS Code notifications, and
-all configuration settings.
-
-**Intentionally left for later:** the real server backend (interface + stub only),
-real-time multi-user WebSocket sync, and richer conflict resolution beyond the
-`updatedAt` guard used by the local watcher.
+MIT — see [LICENSE](LICENSE).

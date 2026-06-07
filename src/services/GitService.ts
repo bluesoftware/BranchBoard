@@ -1,5 +1,6 @@
 import { execFile } from "child_process";
 import { BoardTask, BranchBoardConfig, GitInfo, OperationResult } from "../types";
+import { SafetyService } from "./SafetyService";
 
 interface GitExecResult {
   stdout: string;
@@ -22,9 +23,24 @@ export class GitService {
 
   /* ---------------- low level ---------------- */
 
+  /**
+   * Build the environment for git, injecting GIT_SSH_COMMAND when a specific
+   * SSH key is configured so pushes/pulls use that key (and only that key).
+   */
+  private buildEnv(): NodeJS.ProcessEnv {
+    const key = (this.getConfig().sshKeyPath || "").trim();
+    if (!key) {
+      return process.env;
+    }
+    // Quote the path so spaces are handled; IdentitiesOnly avoids the agent
+    // offering other keys first.
+    const sshCmd = `ssh -i "${key}" -o IdentitiesOnly=yes`;
+    return { ...process.env, GIT_SSH_COMMAND: sshCmd };
+  }
+
   private run(args: string[]): Promise<GitExecResult> {
     return new Promise((resolve, reject) => {
-      execFile("git", args, { cwd: this.cwd, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile("git", args, { cwd: this.cwd, windowsHide: true, maxBuffer: 10 * 1024 * 1024, env: this.buildEnv() }, (err, stdout, stderr) => {
         if (err) {
           const e = new Error(stderr?.trim() || err.message);
           (e as any).stdout = stdout;
@@ -102,6 +118,464 @@ export class GitService {
       }
     };
     return { name: await read("user.name"), email: await read("user.email") };
+  }
+
+  /** Unique commit authors across all branches: used to seed board users. */
+  async getContributors(): Promise<Array<{ name: string; email: string }>> {
+    try {
+      const { stdout } = await this.run(["log", "--all", "--format=%an%x09%ae"]);
+      const seen = new Set<string>();
+      const out: Array<{ name: string; email: string }> = [];
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const [name, email] = line.split("\t");
+        const key = (email || name || "").toLowerCase().trim();
+        if (!key || seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        out.push({ name: (name || "").trim(), email: (email || "").trim() });
+      }
+      return out;
+    } catch {
+      // Empty repo / no commits yet.
+      return [];
+    }
+  }
+
+  /**
+   * Local branches with their last commit timestamp/subject, newest first.
+   * Pure read against refs/heads — no network access.
+   */
+  async listLocalBranches(): Promise<
+    Array<{ name: string; lastCommitAt: string | null; lastCommitMessage: string | null }>
+  > {
+    try {
+      const { stdout } = await this.run([
+        "for-each-ref",
+        "--sort=-committerdate",
+        "--format=%(refname:short)%09%(committerdate:iso-strict)%09%(contents:subject)",
+        "refs/heads",
+      ]);
+      const out: Array<{ name: string; lastCommitAt: string | null; lastCommitMessage: string | null }> = [];
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const [name, date, ...rest] = line.split("\t");
+        out.push({
+          name: (name || "").trim(),
+          lastCommitAt: (date || "").trim() || null,
+          lastCommitMessage: rest.join("\t").trim() || null,
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  /** True if a remote-tracking ref exists locally (proxy for "was pushed"). */
+  async hasRemoteTrackingRef(branchName: string): Promise<boolean> {
+    const remote = this.getConfig().remoteName || "origin";
+    try {
+      await this.run(["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}/${branchName}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Compare a branch against main using only local data:
+   *  - ahead/behind commit counts (rev-list --left-right)
+   *  - number of files changed since the merge-base (diff --name-only A...B)
+   *  - last commit time/subject
+   *  - whether a remote-tracking ref exists (pushed)
+   * Every field degrades gracefully to a safe default on error.
+   */
+  async getBranchStats(
+    branchName: string,
+    mainBranch: string
+  ): Promise<{
+    existsLocal: boolean;
+    existsRemote: boolean;
+    ahead: number;
+    behind: number;
+    changedFiles: number;
+    changedFilePaths: string[];
+    lastCommitAt: string | null;
+    lastCommitMessage: string | null;
+  }> {
+    const existsLocal = await this.branchExists(branchName);
+    const existsRemote = await this.hasRemoteTrackingRef(branchName);
+
+    let ahead = 0;
+    let behind = 0;
+    let changedFiles = 0;
+    let changedFilePaths: string[] = [];
+    let lastCommitAt: string | null = null;
+    let lastCommitMessage: string | null = null;
+
+    if (existsLocal) {
+      try {
+        const { stdout } = await this.run(["log", "-1", "--format=%cI%x09%s", branchName]);
+        const [date, ...rest] = stdout.trim().split("\t");
+        lastCommitAt = date || null;
+        lastCommitMessage = rest.join("\t") || null;
+      } catch {
+        /* no commits */
+      }
+
+      const mainOk = mainBranch && (await this.branchExists(mainBranch)) && mainBranch !== branchName;
+      if (mainOk) {
+        try {
+          // left = commits only on main (behind), right = only on branch (ahead)
+          const { stdout } = await this.run([
+            "rev-list",
+            "--left-right",
+            "--count",
+            `${mainBranch}...${branchName}`,
+          ]);
+          const [left, right] = stdout.trim().split(/\s+/);
+          behind = Number(left) || 0;
+          ahead = Number(right) || 0;
+        } catch {
+          /* unrelated histories etc. */
+        }
+        try {
+          const { stdout } = await this.run([
+            "diff",
+            "--name-only",
+            `${mainBranch}...${branchName}`,
+          ]);
+          changedFilePaths = stdout.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 500);
+          changedFiles = changedFilePaths.length;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    return {
+      existsLocal,
+      existsRemote,
+      ahead,
+      behind,
+      changedFiles,
+      changedFilePaths,
+      lastCommitAt,
+      lastCommitMessage,
+    };
+  }
+
+  /** Absolute working-directory path (workspace root). */
+  getCwd(): string {
+    return this.cwd;
+  }
+
+  /**
+   * Commit DAG across all branches, newest first, with parent hashes — the raw
+   * data the Branch Map graph lays out. Read-only, no network.
+   */
+  async getCommitGraph(limit = 200): Promise<
+    Array<{ hash: string; shortHash: string; parents: string[]; author: string; date: string; subject: string }>
+  > {
+    try {
+      // %x1f = unit separator between fields; parents are space-separated in %P.
+      const { stdout } = await this.run([
+        "log",
+        "--all",
+        "--date-order",
+        `-${limit}`,
+        "--pretty=%H%x1f%h%x1f%P%x1f%an%x1f%cI%x1f%s",
+      ]);
+      const out: Array<{ hash: string; shortHash: string; parents: string[]; author: string; date: string; subject: string }> = [];
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const [hash, shortHash, parents, author, date, ...rest] = line.split("\x1f");
+        out.push({
+          hash: (hash || "").trim(),
+          shortHash: (shortHash || "").trim(),
+          parents: (parents || "").trim() ? parents.trim().split(/\s+/) : [],
+          author: (author || "").trim(),
+          date: (date || "").trim(),
+          subject: rest.join("\x1f").trim(),
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Files changed by a single commit (vs its first parent), with line counts. */
+  async getCommitFiles(hash: string): Promise<
+    Array<{ path: string; status: string; additions: number; deletions: number }>
+  > {
+    if (!hash || !/^[0-9a-fA-F]+$/.test(hash)) {
+      return [];
+    }
+    const statusByPath = new Map<string, string>();
+    try {
+      const { stdout } = await this.run(["show", "--name-status", "--format=", hash]);
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const parts = line.split("\t");
+        const status = (parts[0] || "").trim();
+        const path = (parts[parts.length - 1] || "").trim();
+        if (path) {
+          statusByPath.set(path, status.charAt(0) || "M");
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    const files: Array<{ path: string; status: string; additions: number; deletions: number }> = [];
+    try {
+      const { stdout } = await this.run(["show", "--numstat", "--format=", hash]);
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const [add, del, ...rest] = line.split("\t");
+        const path = rest.join("\t").trim();
+        if (!path) {
+          continue;
+        }
+        files.push({
+          path,
+          status: statusByPath.get(path) || "M",
+          additions: add === "-" ? 0 : Number(add) || 0,
+          deletions: del === "-" ? 0 : Number(del) || 0,
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    return files.slice(0, 500);
+  }
+
+  /** Single-commit metadata (hash/author/date/subject). */
+  async getCommitMeta(hash: string): Promise<{ hash: string; shortHash: string; author: string; date: string; subject: string } | null> {
+    if (!hash || !/^[0-9a-fA-F]+$/.test(hash)) {
+      return null;
+    }
+    try {
+      const { stdout } = await this.run(["log", "-1", "--format=%H%x09%h%x09%an%x09%cI%x09%s", hash]);
+      const [h, sh, author, date, ...rest] = stdout.trim().split("\t");
+      return { hash: h, shortHash: sh, author, date, subject: rest.join("\t") };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Map of commit hash → branch names whose tip is that commit (local + remote-tracking). */
+  async getBranchTips(): Promise<Record<string, string[]>> {
+    const tips: Record<string, string[]> = {};
+    try {
+      const { stdout } = await this.run([
+        "for-each-ref",
+        "--format=%(objectname)%x09%(refname:short)",
+        "refs/heads",
+        "refs/remotes",
+      ]);
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const [hash, name] = line.split("\t");
+        const h = (hash || "").trim();
+        const n = (name || "").trim();
+        if (!h || !n || n.endsWith("/HEAD")) {
+          continue;
+        }
+        (tips[h] = tips[h] || []).push(n);
+      }
+    } catch {
+      /* ignore */
+    }
+    return tips;
+  }
+
+  /**
+   * Integrate main into the current branch. "merge" fetches and merges
+   * origin/main (safe — creates a merge commit). "rebase" replays commits on top
+   * of origin/main (rewrites local history). Assumes a clean working tree.
+   */
+  async updateBranchFromMain(strategy: "merge" | "rebase"): Promise<OperationResult> {
+    const remote = this.getConfig().remoteName || "origin";
+    const main = await this.getMainBranch();
+    try {
+      await this.run(["fetch", remote, main]);
+    } catch (err: any) {
+      return { ok: false, action: "updateBranchFromMain", message: `Fetch of ${remote}/${main} failed.`, detail: err?.message };
+    }
+    try {
+      if (strategy === "rebase") {
+        const { stdout } = await this.run(["rebase", `${remote}/${main}`]);
+        return { ok: true, action: "updateBranchFromMain", message: `Rebased onto ${remote}/${main}.`, detail: stdout.trim() };
+      }
+      const { stdout } = await this.run(["merge", "--no-edit", `${remote}/${main}`]);
+      return { ok: true, action: "updateBranchFromMain", message: `Merged ${remote}/${main} into the current branch.`, detail: stdout.trim() };
+    } catch (err: any) {
+      // Abort a conflicted merge/rebase so the working tree stays clean.
+      try {
+        await this.run([strategy === "rebase" ? "rebase" : "merge", "--abort"]);
+      } catch {
+        /* nothing to abort */
+      }
+      return {
+        ok: false,
+        action: "updateBranchFromMain",
+        message: `Update from ${main} failed (conflict or error). The operation was aborted.`,
+        detail: err?.message,
+      };
+    }
+  }
+
+  /**
+   * Repo files (tracked + untracked, respecting .gitignore) filtered by a
+   * case-insensitive substring query. Used for the task's attach-file
+   * autocomplete. Read-only, no network.
+   */
+  async listTrackedFiles(query = "", limit = 10): Promise<string[]> {
+    try {
+      const { stdout } = await this.run(["ls-files", "--cached", "--others", "--exclude-standard"]);
+      const q = query.trim().toLowerCase();
+      const all = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+      const matched = q ? all.filter((f) => f.toLowerCase().includes(q)) : all;
+      // Prefer matches where the filename (not just the path) contains the query.
+      matched.sort((a, b) => {
+        if (!q) {
+          return a.localeCompare(b);
+        }
+        const aName = a.slice(a.lastIndexOf("/") + 1).toLowerCase().includes(q) ? 0 : 1;
+        const bName = b.slice(b.lastIndexOf("/") + 1).toLowerCase().includes(q) ? 0 : 1;
+        return aName - bName || a.length - b.length;
+      });
+      return matched.slice(0, limit);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Contents of a file at a given ref (git show ref:path). Returns null when the
+   * file does not exist at that ref (e.g. it was added on the branch, so it has
+   * no main version, or deleted on the branch). Never throws.
+   */
+  async getFileAtRef(ref: string, relPath: string): Promise<string | null> {
+    const path = (relPath || "").trim();
+    if (!path || !ref) {
+      return null;
+    }
+    try {
+      const { stdout } = await this.run(["show", `${ref}:${path}`]);
+      return stdout;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Commits unique to a branch vs main (main..branch). Falls back to the
+   * branch's own log when main is unavailable. Read-only, no network.
+   */
+  async getCommits(branchName: string, mainBranch: string, limit = 80): Promise<
+    Array<{ hash: string; shortHash: string; author: string; date: string; subject: string }>
+  > {
+    const range =
+      mainBranch && mainBranch !== branchName && (await this.branchExists(mainBranch))
+        ? `${mainBranch}..${branchName}`
+        : branchName;
+    try {
+      const { stdout } = await this.run([
+        "log",
+        `-${limit}`,
+        "--pretty=%H%x09%h%x09%an%x09%cI%x09%s",
+        range,
+      ]);
+      const out: Array<{ hash: string; shortHash: string; author: string; date: string; subject: string }> = [];
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const [hash, shortHash, author, date, ...rest] = line.split("\t");
+        out.push({
+          hash: (hash || "").trim(),
+          shortHash: (shortHash || "").trim(),
+          author: (author || "").trim(),
+          date: (date || "").trim(),
+          subject: rest.join("\t").trim(),
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Files changed on a branch vs main with status and line counts
+   * (diff --numstat + --name-status, merged by path).
+   */
+  async getBranchDiffFiles(branchName: string, mainBranch: string): Promise<
+    Array<{ path: string; status: string; additions: number; deletions: number }>
+  > {
+    const base =
+      mainBranch && mainBranch !== branchName && (await this.branchExists(mainBranch))
+        ? `${mainBranch}...${branchName}`
+        : null;
+    if (!base) {
+      return [];
+    }
+    const statusByPath = new Map<string, string>();
+    try {
+      const { stdout } = await this.run(["diff", "--name-status", base]);
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const parts = line.split("\t");
+        const status = (parts[0] || "").trim();
+        const path = (parts[parts.length - 1] || "").trim();
+        if (path) {
+          statusByPath.set(path, status.charAt(0) || "M");
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    const files: Array<{ path: string; status: string; additions: number; deletions: number }> = [];
+    try {
+      const { stdout } = await this.run(["diff", "--numstat", base]);
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const [add, del, ...rest] = line.split("\t");
+        const path = rest.join("\t").trim();
+        if (!path) {
+          continue;
+        }
+        files.push({
+          path,
+          status: statusByPath.get(path) || "M",
+          additions: add === "-" ? 0 : Number(add) || 0,
+          deletions: del === "-" ? 0 : Number(del) || 0,
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+    return files.slice(0, 500);
   }
 
   async hasUncommittedChanges(): Promise<boolean> {
@@ -230,13 +704,21 @@ export class GitService {
     }
   }
 
-  async deleteLocalBranch(branchName: string): Promise<OperationResult> {
+  async deleteLocalBranch(branchName: string, force = false): Promise<OperationResult> {
     try {
       await this.assertValidBranchName(branchName);
-      await this.run(["branch", "-d", branchName]);
+      // -d refuses to delete unmerged work (safe); -D forces (used after archiving).
+      await this.run(["branch", force ? "-D" : "-d", branchName]);
       return { ok: true, action: "deleteLocalBranch", message: `Deleted local branch '${branchName}'.` };
     } catch (err: any) {
-      return { ok: false, action: "deleteLocalBranch", message: `Could not delete local branch '${branchName}'.`, detail: err?.message };
+      return {
+        ok: false,
+        action: "deleteLocalBranch",
+        message: force
+          ? `Could not delete local branch '${branchName}'.`
+          : `Could not delete '${branchName}' — it may have unmerged changes. Archive it instead, or merge first.`,
+        detail: err?.message,
+      };
     }
   }
 
@@ -248,6 +730,65 @@ export class GitService {
       return { ok: true, action: "deleteRemoteBranch", message: `Deleted remote branch '${remote}/${branchName}'.` };
     } catch (err: any) {
       return { ok: false, action: "deleteRemoteBranch", message: `Could not delete remote branch '${branchName}'.`, detail: err?.message };
+    }
+  }
+
+  /** Create a lightweight tag at a given ref (default HEAD). Safe, non-destructive. */
+  async createTag(tagName: string, ref = "HEAD"): Promise<OperationResult> {
+    try {
+      const name = (tagName || "").trim();
+      if (!name || name.startsWith("-")) {
+        throw new Error(`Invalid tag name: ${tagName}`);
+      }
+      await this.run(["tag", name, ref]);
+      return { ok: true, action: "createTag", message: `Created tag '${name}'.` };
+    } catch (err: any) {
+      return { ok: false, action: "createTag", message: `Could not create tag '${tagName}'.`, detail: err?.message };
+    }
+  }
+
+  /**
+   * Create a backup branch pointing at `source` WITHOUT checking it out
+   * (git branch <backup> <source>). Non-destructive snapshot.
+   */
+  async createBackupBranch(backupName: string, source: string): Promise<OperationResult> {
+    try {
+      await this.assertValidBranchName(backupName);
+      await this.assertValidBranchName(source);
+      await this.run(["branch", backupName, source]);
+      return { ok: true, action: "createBackupBranch", message: `Backup branch '${backupName}' created.` };
+    } catch (err: any) {
+      return {
+        ok: false,
+        action: "createBackupBranch",
+        message: `Could not create backup branch '${backupName}'.`,
+        detail: err?.message,
+      };
+    }
+  }
+
+  /**
+   * Revert the last commit on a branch (git revert --no-edit HEAD). This is the
+   * SAFE undo: it creates a new commit, it never rewrites history. Assumes the
+   * branch is checked out and the tree is clean.
+   */
+  async revertLastCommit(): Promise<OperationResult> {
+    try {
+      const { stdout } = await this.run(["revert", "--no-edit", "HEAD"]);
+      return { ok: true, action: "revertLastCommit", message: "Reverted the last commit.", detail: stdout.trim() };
+    } catch (err: any) {
+      // Abort a conflicted revert so the tree is left clean.
+      try {
+        await this.run(["revert", "--abort"]);
+      } catch {
+        /* nothing to abort */
+      }
+      return {
+        ok: false,
+        action: "revertLastCommit",
+        message: "Could not revert the last commit (conflict or error). Revert aborted.",
+        detail: err?.message,
+      };
     }
   }
 
@@ -366,6 +907,18 @@ export async function finishTaskGitFlow(
         moveToColumnId: "review",
       };
     }
+  }
+
+  // 5b. Non-destructive safety nets before touching main.
+  if (config.createBackupBranchBeforeMerge) {
+    const backup = SafetyService.backupBranchName(branch);
+    const res = await git.createBackupBranch(backup, branch);
+    cb.info(res.ok ? `Backup branch created: ${backup}` : `Backup branch failed: ${res.detail ?? res.message}`);
+  }
+  if (config.createSafetyTagBeforeMerge) {
+    const tag = SafetyService.safetyTagName(task.id);
+    const res = await git.createTag(tag, main);
+    cb.info(res.ok ? `Safety tag created: ${tag}` : `Safety tag failed: ${res.detail ?? res.message}`);
   }
 
   // 6. Checkout main, pull, merge, push.

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BoardUser, UserFilter } from "../types";
 import { post } from "../vscode";
+import { t } from "../i18n";
 
 interface Props {
   users: BoardUser[];
@@ -8,6 +9,17 @@ interface Props {
   filter: UserFilter;
   onChange: (f: UserFilter) => void;
 }
+
+const STATIC_FILTERS: Array<{ key: UserFilter; labelKey: string }> = [
+  { key: "me", labelKey: "topBar.myTasks" },
+  { key: "all", labelKey: "topBar.allTasks" },
+  { key: "unassigned", labelKey: "topBar.unassigned" },
+  { key: "current-branch", labelKey: "topBar.currentBranch" },
+  { key: "has-branch", labelKey: "topBar.hasBranch" },
+  { key: "no-branch", labelKey: "topBar.noBranch" },
+  { key: "needs-review", labelKey: "topBar.needsReview" },
+  { key: "done", labelKey: "topBar.done" },
+];
 
 export function UserSwitcher({ users, currentUserId, filter, onChange }: Props) {
   const [open, setOpen] = useState(false);
@@ -23,12 +35,15 @@ export function UserSwitcher({ users, currentUserId, filter, onChange }: Props) 
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const label =
-    filter === "all"
-      ? "All tasks"
-      : filter === "me"
-      ? "My tasks"
-      : users.find((u) => u.id === filter)?.name ?? "Filter";
+  const staticLabel = STATIC_FILTERS.find((f) => f.key === filter);
+  const label = staticLabel
+    ? t(staticLabel.labelKey)
+    : users.find((u) => u.id === filter)?.name ?? t("topBar.filter");
+
+  const choose = (f: UserFilter) => {
+    onChange(f);
+    setOpen(false);
+  };
 
   return (
     <div className="bb-userswitcher" ref={ref}>
@@ -38,39 +53,27 @@ export function UserSwitcher({ users, currentUserId, filter, onChange }: Props) 
       </button>
       {open && (
         <div className="bb-menu">
-          <button
-            className={`bb-menu-item ${filter === "me" ? "active" : ""}`}
-            onClick={() => {
-              onChange("me");
-              setOpen(false);
-            }}
-          >
-            My tasks
-          </button>
-          <button
-            className={`bb-menu-item ${filter === "all" ? "active" : ""}`}
-            onClick={() => {
-              onChange("all");
-              setOpen(false);
-            }}
-          >
-            All tasks
-          </button>
-          <div className="bb-menu-sep" />
+          {STATIC_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              className={`bb-menu-item ${filter === f.key ? "active" : ""}`}
+              onClick={() => choose(f.key)}
+            >
+              {t(f.labelKey)}
+            </button>
+          ))}
+          {users.length > 0 && <div className="bb-menu-sep" />}
           {users.map((u) => (
             <button
               key={u.id}
               className={`bb-menu-item ${filter === u.id ? "active" : ""}`}
-              onClick={() => {
-                onChange(u.id);
-                setOpen(false);
-              }}
+              onClick={() => choose(u.id)}
             >
               <span className="bb-avatar small" style={{ background: u.color }}>
                 {u.avatarText}
               </span>
               {u.name}
-              {u.id === currentUserId ? " (you)" : ""}
+              {u.id === currentUserId ? ` (${t("topBar.you")})` : ""}
             </button>
           ))}
           <div className="bb-menu-sep" />
@@ -83,7 +86,16 @@ export function UserSwitcher({ users, currentUserId, filter, onChange }: Props) 
               setOpen(false);
             }}
           >
-            Re-detect git user
+            {t("topBar.redetectUser")}
+          </button>
+          <button
+            className="bb-menu-item"
+            onClick={() => {
+              post("syncUsers");
+              setOpen(false);
+            }}
+          >
+            {t("topBar.importUsers")}
           </button>
         </div>
       )}

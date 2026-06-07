@@ -1,8 +1,8 @@
 {
-  "version": 1,
+  "version": 3,
   "projectName": "Leniwiec",
   "boardTitle": "LENIWIEC",
-  "updatedAt": "2026-06-06T01:24:49.706Z",
+  "updatedAt": "2026-06-07T23:47:52.180Z",
   "columns": [
     {
       "id": "app-sklep",
@@ -49,6 +49,13 @@
       "email": "",
       "avatarText": "HA",
       "color": "#f472b6"
+    },
+    {
+      "id": "biuro",
+      "name": "Dariusz Włodarski",
+      "email": "biuro@blue-software.pl",
+      "avatarText": "DW",
+      "color": "#34d399"
     }
   ],
   "tasks": [
@@ -56,7 +63,7 @@
       "id": "task_mq1o5tnc_mwjy",
       "title": "TEST",
       "description": "TEST",
-      "columnId": "app-sklep",
+      "columnId": "done",
       "position": 1,
       "assignedUserId": "darek",
       "branchName": "feature/c_mwjy-test",
@@ -70,9 +77,41 @@
       ],
       "checklist": [],
       "createdAt": "2026-06-06T01:23:19.512Z",
-      "updatedAt": "2026-06-06T01:24:49.706Z",
+      "updatedAt": "2026-06-06T01:28:12.701Z",
+      "finishedAt": "2026-06-06T01:28:12.701Z",
+      "status": "done",
+      "priority": "none"
+    },
+    {
+      "id": "task_mq4fk2dq_i8x8",
+      "title": "Pierwsze",
+      "description": "",
+      "columnId": "app-sklep",
+      "position": 1,
+      "assignedUserId": "darek",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "priority": "none",
+      "comments": [],
+      "checklist": [],
+      "createdAt": "2026-06-07T23:45:45.998Z",
+      "updatedAt": "2026-06-07T23:47:52.180Z",
       "finishedAt": null,
       "status": "open"
     }
-  ]
+  ],
+  "events": [
+    {
+      "id": "ev_mq4fk2dq_4gyo",
+      "type": "task_created",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": null,
+      "userId": "darek",
+      "createdAt": "2026-06-07T23:45:45.998Z",
+      "payload": {
+        "title": "Pierwsze",
+        "columnId": "app-sklep"
+      }
+    }
+  ],
+  "deployments": []
 }

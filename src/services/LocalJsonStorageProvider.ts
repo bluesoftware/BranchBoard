@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { BoardData } from "../types";
-import { StorageProvider, createDefaultBoard } from "./StorageProvider";
+import { StorageProvider, createDefaultBoard, BOARD_SCHEMA_VERSION } from "./StorageProvider";
 
 /**
  * Stores the board in a JSON file inside the workspace
@@ -62,47 +62,100 @@ export class LocalJsonStorageProvider implements StorageProvider {
     }
   }
 
+  /** URI of the safety backup written before each save. */
+  private get backupUri(): vscode.Uri {
+    return this.fileUri.with({ path: this.fileUri.path.replace(/\.json$/i, ".backup.json") });
+  }
+
   async load(): Promise<BoardData> {
+    // 1. No file yet -> create a fresh default board.
+    let bytes: Uint8Array;
     try {
-      const board = await this.readFile();
-      this.lastSerialized = JSON.stringify(board);
-      return board;
+      bytes = await vscode.workspace.fs.readFile(this.fileUri);
     } catch {
-      // No file yet -> create the default board.
       const board = createDefaultBoard(this.projectName, this.boardTitle, this.seedUsers);
       await this.save(board);
       return board;
     }
+
+    // 2. File exists -> parse safely. On corruption, try the backup instead of
+    //    destroying the user's data by overwriting with a default board.
+    try {
+      const board = this.parse(bytes);
+      this.lastSerialized = JSON.stringify(board);
+      return board;
+    } catch (primaryErr) {
+      try {
+        const backupBytes = await vscode.workspace.fs.readFile(this.backupUri);
+        const board = this.parse(backupBytes);
+        this.lastSerialized = JSON.stringify(board);
+        return board;
+      } catch {
+        throw new Error(
+          `Board file is corrupted and no valid backup was found (${this.fileUri.fsPath}). ` +
+            `Fix or remove the file, then reload. Original error: ${(primaryErr as Error)?.message}`
+        );
+      }
+    }
+  }
+
+  private parse(bytes: Uint8Array): BoardData {
+    const text = Buffer.from(bytes).toString("utf8");
+    const parsed = JSON.parse(text) as BoardData;
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.columns)) {
+      throw new Error("Board file does not contain a valid board object.");
+    }
+    return this.normalize(parsed);
   }
 
   private async readFile(): Promise<BoardData> {
     const bytes = await vscode.workspace.fs.readFile(this.fileUri);
-    const text = Buffer.from(bytes).toString("utf8");
-    const parsed = JSON.parse(text) as BoardData;
-    return this.normalize(parsed);
+    return this.parse(bytes);
   }
 
-  /** Make sure required arrays/fields exist so the rest of the app is safe. */
+  /**
+   * Make sure required arrays/fields exist and migrate older schema versions so
+   * the rest of the app is always safe. New fields (e.g. priority) get sensible
+   * defaults for boards created before they existed.
+   */
   private normalize(board: BoardData): BoardData {
     board.columns = board.columns ?? [];
     board.users = board.users ?? [];
+    // v3: events + deployments. Older boards simply start with empty arrays.
+    board.events = Array.isArray(board.events) ? board.events : [];
+    board.deployments = (Array.isArray(board.deployments) ? board.deployments : []).map((d) => ({
+      ...d,
+      tested: d.tested ?? false,
+    }));
     board.tasks = (board.tasks ?? []).map((t) => ({
       ...t,
       comments: t.comments ?? [],
       checklist: t.checklist ?? [],
       assignedUserId: t.assignedUserId ?? null,
       branchName: t.branchName ?? "",
+      priority: t.priority ?? "none",
       status: t.status ?? "open",
       finishedAt: t.finishedAt ?? null,
     }));
+    board.version = BOARD_SCHEMA_VERSION;
     return board;
   }
 
   async save(board: BoardData): Promise<void> {
+    board.version = BOARD_SCHEMA_VERSION;
     board.updatedAt = new Date().toISOString();
     const text = JSON.stringify(board, null, 2);
     const dir = vscode.Uri.file(path.dirname(this.fileUri.fsPath));
     await vscode.workspace.fs.createDirectory(dir);
+
+    // Best-effort backup of the previous good state before overwriting.
+    try {
+      const prev = await vscode.workspace.fs.readFile(this.fileUri);
+      await vscode.workspace.fs.writeFile(this.backupUri, prev);
+    } catch {
+      // No previous file (first save) — nothing to back up.
+    }
+
     this.lastWriteAt = Date.now();
     this.lastSerialized = JSON.stringify(board);
     await vscode.workspace.fs.writeFile(this.fileUri, Buffer.from(text, "utf8"));

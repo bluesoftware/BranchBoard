@@ -2,14 +2,25 @@
   // ===== BranchBoard – konfiguracja dla projektu "Leniwiec" (Git przez SSH) =====
 
   // Nazwa / tytuł tablicy
-  "branchBoard.projectName": "Leniwiec",
-  "branchBoard.boardTitle": "LENIWIEC",
+  "branchBoard.projectName": "Topestetic.pl",
+  "branchBoard.boardTitle": "Topestetic.pl",
 
   // Dane lokalnie w repo (możesz commitować, by dzielić tablicę z zespołem)
   "branchBoard.storageMode": "workspace-json",
   "branchBoard.localDataFile": ".branchboard/board.json",
 
-  // Tryb server – wyłączony (SSH nie potrzebuje tokenu, używa Twojego klucza)
+  // Tryb server = wspólna baza SQLite przez sqlite3 (NIE URL).
+  //
+  // sshHost PUSTY  -> wtyczka działa NA serwerze, baza otwierana lokalnie (bez SSH).
+  // sshHost USTAWIONY ("user@host" lub alias z ~/.ssh/config) -> dostęp z innego
+  //         komputera przez SSH do tej samej ścieżki sqliteRemotePath.
+  //
+  // Ten plik leży na serwerze, więc host zostaje pusty (dostęp lokalny):
+  "branchBoard.sshHost": "",
+  "branchBoard.sshPort": 22,
+  "branchBoard.sqliteRemotePath": "~/sqlite/branchboard.db",
+
+  // Pola legacy (nieużywane w trybie SSH) – zostają puste
   "branchBoard.serverUrl": "",
   "branchBoard.authToken": "",
 
@@ -17,9 +28,14 @@
   "branchBoard.defaultMainBranch": "main",
   "branchBoard.remoteName": "origin",
 
+  // Klucz SSH używany przez Git (i przyszłe połączenie z serwerem).
+  // Pusty = domyślny agent SSH / ~/.ssh/config.
+  // Najwygodniej: Cmd+Shift+P → "BranchBoard: Select SSH Key" (lista z ~/.ssh).
+  "branchBoard.sshKeyPath": "",
+
   // Użytkownik wykrywany z `git config user.name` / `user.email`
   "branchBoard.autoDetectGitUser": true,
-  "branchBoard.currentUser": "",
+  "branchBoard.currentUser": "darek",
 
   // Odświeżanie / sync
   "branchBoard.syncIntervalSeconds": 20,
@@ -36,5 +52,7 @@
 
   // Sprzątanie brancha po UDANYM merge (działa też po SSH)
   "branchBoard.deleteLocalBranchAfterMerge": true,
-  "branchBoard.deleteRemoteBranchAfterMerge": true
+  "branchBoard.deleteRemoteBranchAfterMerge": true,
+  "branchBoard.appearance.compactMode": false,
+  "branchBoard.aiPromptTemplate": ""
 }

@@ -1,27 +1,43 @@
 import { useState } from "react";
-import { BoardData, GitInfo, UserFilter } from "../types";
+import { AppConfig, BoardData, GitInfo, UserFilter } from "../types";
+import { t } from "../i18n";
 import { UserSwitcher } from "./UserSwitcher";
+import { MainNav, AppView } from "./navigation/MainNav";
+import { Tooltip } from "./common/Tooltip";
+import { BranchIcon, GearIcon, LogoMark, RefreshIcon, SearchIcon } from "./Icons";
 
 interface Props {
   board: BoardData;
   git: GitInfo | null;
+  appConfig: AppConfig;
   currentUserId: string | null;
   filter: UserFilter;
+  search: string;
   onFilterChange: (f: UserFilter) => void;
+  onSearchChange: (q: string) => void;
   onAddColumn: (name: string) => void;
   onRefresh: () => void;
-  onConfigure: () => void;
+  onSync: () => void;
+  onOpenSettings: () => void;
+  page: AppView;
+  onNavigate: (view: AppView) => void;
 }
 
 export function TopBar({
   board,
   git,
+  appConfig,
   currentUserId,
   filter,
+  search,
   onFilterChange,
+  onSearchChange,
   onAddColumn,
   onRefresh,
-  onConfigure,
+  onSync,
+  onOpenSettings,
+  page,
+  onNavigate,
 }: Props) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -35,38 +51,72 @@ export function TopBar({
     setAdding(false);
   };
 
+  const branchLabel = git?.isRepo
+    ? git.currentBranch ?? t("topBar.detached")
+    : t("topBar.noRepo");
+
   return (
     <header className="bb-topbar">
       <div className="bb-topbar-left">
-        <h1 className="bb-title">{board.boardTitle || board.projectName}</h1>
-        {git && (
-          <span className={`bb-branch-chip ${git.hasUncommittedChanges ? "dirty" : ""}`} title={git.error ?? ""}>
-            {git.isRepo ? (
-              <>
-                <BranchIcon />
-                {git.currentBranch ?? "detached"}
-                {git.hasUncommittedChanges ? " •" : ""}
-              </>
-            ) : (
-              "no git repo"
-            )}
+        <span className="bb-brand">
+          <span className="bb-brand-mark">
+            <LogoMark size={18} />
           </span>
+          <h1 className="bb-title">{board.boardTitle || appConfig.boardTitle}</h1>
+        </span>
+        {appConfig.projectName && appConfig.projectName !== board.boardTitle && (
+          <span className="bb-project">· {appConfig.projectName}</span>
         )}
+        <span
+          className={`bb-chip bb-branch-chip ${git?.hasUncommittedChanges ? "dirty" : ""}`}
+          title={git?.error ?? ""}
+        >
+          <BranchIcon size={12} />
+          {branchLabel}
+          {git?.hasUncommittedChanges ? " •" : ""}
+        </span>
+        <span
+          className={`bb-chip bb-storage-chip ${appConfig.storageMode === "server" ? "server" : ""}`}
+        >
+          {appConfig.storageMode === "server" ? t("topBar.storageServer") : t("topBar.storageLocal")}
+        </span>
       </div>
 
+      <MainNav page={page} onNavigate={onNavigate} />
+
+      <div className="bb-topbar-spacer" />
+
       <div className="bb-topbar-right">
+        <div className="bb-search">
+          <SearchIcon size={13} />
+          <input
+            id="bb-search-input"
+            className="bb-input"
+            value={search}
+            placeholder={t("topBar.searchPlaceholder")}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
+          {search && (
+            <button className="bb-iconbtn bb-search-clear" onClick={() => onSearchChange("")} title="Clear">
+              ✕
+            </button>
+          )}
+        </div>
+
         <UserSwitcher
           users={board.users}
           currentUserId={currentUserId}
           filter={filter}
           onChange={onFilterChange}
         />
+
         {adding ? (
           <input
-            className="bb-input bb-addcol-input"
+            className="bb-input"
+            style={{ width: 140 }}
             autoFocus
             value={name}
-            placeholder="Column name"
+            placeholder={t("topBar.columnName")}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") commit();
@@ -78,25 +128,27 @@ export function TopBar({
             onBlur={commit}
           />
         ) : (
-          <button className="bb-btn ghost" onClick={() => setAdding(true)} title="Add column">
-            + Column
+          <button className="bb-btn ghost" onClick={() => setAdding(true)} title={t("topBar.addColumn")}>
+            + {t("topBar.addColumn")}
           </button>
         )}
-        <button className="bb-btn ghost icon" onClick={onRefresh} title="Refresh">
-          ⟳
-        </button>
-        <button className="bb-btn ghost icon" onClick={onConfigure} title="Settings">
-          ⚙
-        </button>
+
+        <Tooltip text={t("topBar.refresh")}>
+          <button
+            className="bb-btn ghost icon"
+            onClick={onSync}
+            onDoubleClick={onRefresh}
+            aria-label={t("topBar.refresh")}
+          >
+            <RefreshIcon size={13} />
+          </button>
+        </Tooltip>
+        <Tooltip text={t("tooltips.nav.settings")}>
+          <button className="bb-btn ghost icon" onClick={onOpenSettings} aria-label={t("topBar.settings")}>
+            <GearIcon size={14} />
+          </button>
+        </Tooltip>
       </div>
     </header>
-  );
-}
-
-function BranchIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M11.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122V6A2.5 2.5 0 0110 8.5H6a1 1 0 00-1 1v1.128a2.251 2.251 0 11-1.5 0V5.372a2.25 2.25 0 111.5 0v1.836A2.492 2.492 0 016 7h4a1 1 0 001-1v-.628A2.25 2.25 0 019.5 3.25zM4.25 12a.75.75 0 100 1.5.75.75 0 000-1.5zM3.5 3.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0z" />
-    </svg>
   );
 }

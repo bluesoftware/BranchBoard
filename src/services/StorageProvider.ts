@@ -41,7 +41,7 @@ export function createDefaultBoard(
         ];
 
   return {
-    version: 1,
+    version: BOARD_SCHEMA_VERSION,
     projectName,
     boardTitle,
     updatedAt: now,
@@ -55,5 +55,23 @@ export function createDefaultBoard(
     ],
     users,
     tasks: [],
+    events: [],
+    deployments: [],
   };
 }
+
+/** Current on-disk board schema version. Bumped when the shape changes. */
+export const BOARD_SCHEMA_VERSION = 3;
+
+/** Hard cap on stored events so board.json never grows unbounded. */
+export const MAX_STORED_EVENTS = 300;
+
+/** Standard column set used by the onboarding "Create board" flow. */
+export const ONBOARDING_COLUMNS: BoardData["columns"] = [
+  { id: "backlog", name: "BACKLOG", position: 1 },
+  { id: "todo", name: "TODO", position: 2 },
+  { id: "in-progress", name: "IN PROGRESS", position: 3 },
+  { id: "review", name: "REVIEW", position: 4 },
+  { id: "testing", name: "TESTING", position: 5 },
+  { id: "done", name: "DONE", position: 99 },
+];

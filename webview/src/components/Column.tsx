@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
-import { BoardColumn, BoardTask, BoardUser } from "../types";
+import { AppConfig, BoardColumn, BoardTask, BoardUser, GitInfo } from "../types";
+import { t } from "../i18n";
 import { TaskCard } from "./TaskCard";
 
 interface Props {
   column: BoardColumn;
   tasks: BoardTask[];
   users: BoardUser[];
+  appConfig: AppConfig;
+  git: GitInfo | null;
   currentUserId: string | null;
   dropIndex: number | null;
   isColumnDragging: boolean;
@@ -16,6 +19,9 @@ interface Props {
   onToggleDone: (task: BoardTask) => void;
   onRenameColumn: (id: string, name: string) => void;
   onDeleteColumn: (id: string) => void;
+  onCheckout: (branchName: string) => void;
+  onPush: (branchName: string) => void;
+  onFinish: (taskId: string) => void;
   onTaskDragStart: (taskId: string) => void;
   onTaskDragEnd: () => void;
   onTaskDragOver: (index: number) => void;
@@ -46,9 +52,9 @@ export function Column(props: Props) {
   }, []);
 
   const commitAdd = () => {
-    const t = title.trim();
-    if (t) {
-      props.onAddTask(column.id, t);
+    const trimmed = title.trim();
+    if (trimmed) {
+      props.onAddTask(column.id, trimmed);
     }
     setTitle("");
     setAdding(false);
@@ -100,11 +106,11 @@ export function Column(props: Props) {
         )}
         <span className="bb-column-count">{tasks.length}</span>
         <div className="bb-column-menu" ref={menuRef}>
-          <button className="bb-iconbtn" onClick={() => setMenuOpen((o) => !o)} title="Column menu">
+          <button className="bb-iconbtn" onClick={() => setMenuOpen((o) => !o)} title={t("column.menu")}>
             ⋯
           </button>
           {menuOpen && (
-            <div className="bb-menu right">
+            <div className="bb-menu">
               <button
                 className="bb-menu-item"
                 onClick={() => {
@@ -112,7 +118,7 @@ export function Column(props: Props) {
                   setMenuOpen(false);
                 }}
               >
-                Rename
+                {t("column.rename")}
               </button>
               <button
                 className="bb-menu-item"
@@ -121,7 +127,7 @@ export function Column(props: Props) {
                   setMenuOpen(false);
                 }}
               >
-                Add task
+                {t("column.addTask")}
               </button>
               <div className="bb-menu-sep" />
               <button
@@ -131,7 +137,7 @@ export function Column(props: Props) {
                   setMenuOpen(false);
                 }}
               >
-                Delete column
+                {t("column.delete")}
               </button>
             </div>
           )}
@@ -153,6 +159,12 @@ export function Column(props: Props) {
           }
         }}
       >
+        {tasks.length === 0 && !adding && (
+          <div className="bb-column-empty">
+            {props.isTaskDragging ? t("board.dropHere") : t("board.emptyColumn")}
+          </div>
+        )}
+
         {tasks.map((task, i) => (
           <div
             key={task.id}
@@ -170,10 +182,15 @@ export function Column(props: Props) {
             <TaskCard
               task={task}
               users={users}
+              appConfig={props.appConfig}
+              git={props.git}
               onOpen={() => props.onOpenTask(task.id)}
               onToggleDone={() => props.onToggleDone(task)}
               onDragStart={() => props.onTaskDragStart(task.id)}
               onDragEnd={props.onTaskDragEnd}
+              onCheckout={props.onCheckout}
+              onPush={props.onPush}
+              onFinish={props.onFinish}
             />
           </div>
         ))}
@@ -185,7 +202,7 @@ export function Column(props: Props) {
               className="bb-input bb-addtask-input"
               autoFocus
               value={title}
-              placeholder="Task name"
+              placeholder={t("board.taskName")}
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
@@ -200,16 +217,16 @@ export function Column(props: Props) {
             />
             <div className="bb-addtask-actions">
               <button className="bb-btn accent" onMouseDown={(e) => e.preventDefault()} onClick={commitAdd}>
-                Add task
+                {t("board.addTask")}
               </button>
               <button className="bb-btn ghost" onClick={() => setAdding(false)}>
-                Cancel
+                {t("board.cancel")}
               </button>
             </div>
           </div>
         ) : (
           <button className="bb-addtask-btn" onClick={() => setAdding(true)}>
-            <span className="bb-plus">+</span> Dodaj zadanie
+            <span className="bb-plus">+</span> {t("board.addTask")}
           </button>
         )}
       </div>

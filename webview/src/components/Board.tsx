@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BoardData, BoardTask, GitInfo } from "../types";
+import { AppConfig, BoardData, BoardTask, GitInfo } from "../types";
 import { Column } from "./Column";
 
 export interface DragState {
@@ -9,6 +9,7 @@ export interface DragState {
 
 interface Props {
   board: BoardData;
+  appConfig: AppConfig;
   git: GitInfo | null;
   currentUserId: string | null;
   getColumnTasks: (columnId: string) => BoardTask[];
@@ -19,6 +20,9 @@ interface Props {
   onDeleteColumn: (id: string) => void;
   onMoveColumn: (orderedIds: string[]) => void;
   onToggleDone: (task: BoardTask) => void;
+  onCheckout: (branchName: string) => void;
+  onPush: (branchName: string) => void;
+  onFinish: (taskId: string) => void;
 }
 
 export function Board(props: Props) {
@@ -60,6 +64,8 @@ export function Board(props: Props) {
           column={col}
           tasks={props.getColumnTasks(col.id)}
           users={board.users}
+          appConfig={props.appConfig}
+          git={props.git}
           currentUserId={props.currentUserId}
           dropIndex={dropTarget?.columnId === col.id ? dropTarget.index : null}
           isColumnDragging={draggedColumnId === col.id}
@@ -68,7 +74,9 @@ export function Board(props: Props) {
           onToggleDone={props.onToggleDone}
           onRenameColumn={props.onRenameColumn}
           onDeleteColumn={props.onDeleteColumn}
-          // task drag
+          onCheckout={props.onCheckout}
+          onPush={props.onPush}
+          onFinish={props.onFinish}
           onTaskDragStart={(taskId) => setDrag({ taskId, fromColumnId: col.id })}
           onTaskDragEnd={() => {
             setDrag(null);
@@ -81,7 +89,6 @@ export function Board(props: Props) {
           }}
           onTaskDrop={() => handleTaskDrop(col.id)}
           isTaskDragging={!!drag}
-          // column drag
           onColumnDragStart={() => setDraggedColumnId(col.id)}
           onColumnDragOverHeader={(e) => {
             if (draggedColumnId) {
