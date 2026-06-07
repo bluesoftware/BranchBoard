@@ -318,9 +318,9 @@ export function App() {
     }
   };
 
+  // Opens the task drawer as an overlay over the CURRENT view — no page switch.
   const openTaskFromDashboard = (taskId: string) => {
     openTask(taskId);
-    setPage("board");
   };
 
   const navigateTo = (view: Page) => {

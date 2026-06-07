@@ -2,7 +2,7 @@
   "version": 3,
   "projectName": "Leniwiec",
   "boardTitle": "LENIWIEC",
-  "updatedAt": "2026-06-07T23:45:45.998Z",
+  "updatedAt": "2026-06-07T23:48:13.101Z",
   "columns": [
     {
       "id": "app-sklep",
@@ -89,12 +89,12 @@
       "columnId": "app-sklep",
       "position": 1,
       "assignedUserId": "darek",
-      "branchName": "",
+      "branchName": "feature/task-dqi8x8-pierwsze",
       "priority": "none",
       "comments": [],
       "checklist": [],
       "createdAt": "2026-06-07T23:45:45.998Z",
-      "updatedAt": "2026-06-07T23:45:45.998Z",
+      "updatedAt": "2026-06-07T23:48:13.101Z",
       "finishedAt": null,
       "status": "open"
     }
