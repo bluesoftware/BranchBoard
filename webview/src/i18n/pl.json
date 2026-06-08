@@ -39,7 +39,39 @@
     "addTask": "Dodaj zadanie",
     "delete": "Usuń kolumnę",
     "menu": "Menu kolumny",
-    "notEmpty": "Kolumna nie jest pusta."
+    "notEmpty": "Kolumna nie jest pusta.",
+    "configure": "Konfiguruj komendy…"
+  },
+  "gitStage": {
+    "none": "Bez brancha",
+    "feature": "Feature (origin/branch)",
+    "review": "Code review (push + PR)",
+    "staging": "Staging (origin/dev)",
+    "production": "Produkcja (origin/main)"
+  },
+  "columnConfig": {
+    "title": "Konfiguracja kolumny",
+    "nameEn": "Nazwa (EN)",
+    "gitStage": "Etap Git",
+    "baseBranch": "Branch bazowy",
+    "targetBranch": "Branch docelowy (merge)",
+    "branchPrefix": "Prefiks brancha",
+    "wipLimit": "Limit WIP (0 = brak)",
+    "onEnter": "Komendy przy WEJŚCIU do kolumny",
+    "onLeave": "Komendy przy WYJŚCIU z kolumny",
+    "addCommand": "Dodaj komendę",
+    "removeCommand": "Usuń komendę",
+    "noCommands": "Brak komend. Dodaj pierwszą.",
+    "label": "Etykieta (np. Uruchom testy)",
+    "enabled": "Włączona",
+    "blocking": "Blokująca (musi przejść)",
+    "confirm": "Pytaj o potwierdzenie",
+    "cleanTree": "Wymagaj czystego drzewa",
+    "continueOnError": "Kontynuuj po błędzie",
+    "timeout": "Limit (s)",
+    "notAllowed": "Komenda spoza listy dozwolonych (branchBoard.allowedCommands).",
+    "securityNote": "Komendy uruchamiane są bez powłoki, tylko dozwolone binaria. Zmienne: {{branch}} {{taskId}} {{slug}} {{baseBranch}} {{targetBranch}} {{mainBranch}}. Każde uruchomienie trafia do .branchboard/audit.log.",
+    "save": "Zapisz"
   },
   "task": {
     "add": "Dodaj zadanie",

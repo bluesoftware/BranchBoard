@@ -7,10 +7,82 @@ export type TaskStatus = "open" | "in-progress" | "done";
 
 export type TaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
+/**
+ * Where a column sits in the Git lifecycle. Drives branch naming + merge
+ * targets and lets the board reason about "what does main/dev/feature mean here".
+ *  - none:       no branch involved (Backlog / To Do).
+ *  - feature:    work happens on origin/<prefix><branch>, cut from baseBranch.
+ *  - review:     branch is pushed; a PR/code-review is expected.
+ *  - staging:    integrated into the dev/integration branch (e.g. origin/dev).
+ *  - production: released into the production branch (e.g. origin/main).
+ */
+export type GitStage = "none" | "feature" | "review" | "staging" | "production";
+
+/** When a column hook fires relative to a task move. */
+export type ColumnHookTrigger = "onEnter" | "onLeave";
+
+/**
+ * A single command attached to a column. Commands are NEVER run through a
+ * shell: the binary is matched against an allowlist and arguments are passed
+ * to execFile as a separate array, so task data can never be injected.
+ */
+export interface ColumnHook {
+  id: string;
+  /** Human label shown in the UI ("Run tests"). */
+  label: string;
+  /** Binary to run — must be present in branchBoard.allowedCommands. */
+  command: string;
+  /** Arguments, each a separate token. Supports {{branch}} {{taskId}} etc. */
+  args: string[];
+  /** Ask the user to confirm before running this command. */
+  requireConfirm: boolean;
+  /** Refuse to run (and block the move if blocking) when the tree is dirty. */
+  requireCleanTree: boolean;
+  /** If false, a failure stops the remaining hooks in the chain. */
+  continueOnError: boolean;
+  /** Hard timeout in seconds; the process is killed past this. */
+  timeoutSec: number;
+  /** If true, this hook must succeed for the task to settle in the column. */
+  blocking: boolean;
+  /** Disabled hooks are ignored (safe default for samples). */
+  enabled: boolean;
+}
+
 export interface BoardColumn {
   id: string;
   name: string;
   position: number;
+  /** Optional English label (board can be shown in PL or EN). */
+  nameEn?: string;
+  /** Git lifecycle stage this column represents. */
+  gitStage?: GitStage;
+  /** Branch new feature branches are cut from at this stage (e.g. "dev"). */
+  baseBranch?: string;
+  /** Merge target when finishing from this stage (e.g. "dev" or "main"). */
+  targetBranch?: string;
+  /** Prefix applied to auto-generated branch names (e.g. "feature/"). */
+  branchPrefix?: string;
+  /** Max tasks allowed in this column (0/undefined = unlimited). */
+  wipLimit?: number;
+  /** Commands run when a task enters this column. */
+  onEnter?: ColumnHook[];
+  /** Commands run when a task leaves this column. */
+  onLeave?: ColumnHook[];
+}
+
+/** Result of running one column hook, reported back to the webview. */
+export interface ColumnHookResult {
+  hookId: string;
+  label: string;
+  command: string;
+  args: string[];
+  ok: boolean;
+  skipped: boolean;
+  exitCode: number | null;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+  message: string;
 }
 
 export interface BoardUser {
@@ -428,6 +500,20 @@ export interface BranchBoardConfig {
   /** Safety (Stage 3). */
   createSafetyTagBeforeMerge: boolean;
   createBackupBranchBeforeMerge: boolean;
+  /** Column command hooks. */
+  enableColumnHooks: boolean;
+  /** Binaries column hooks are allowed to run (allowlist, no shell). */
+  allowedCommands: string[];
+  /** Default per-hook timeout when a hook does not specify one. */
+  hookTimeoutSeconds: number;
+  /** Whether the workflow uses a dev/integration branch (configurable Git model). */
+  useDevBranch: boolean;
+  /** Default prefix for auto-generated feature branch names. */
+  defaultBranchPrefix: string;
+  /** Run Git actions (branch/checkout/push/merge) driven by a column's gitStage on move. */
+  runGitActionsOnMove: boolean;
+  /** Ask for confirmation before destructive move-driven Git actions (merge). */
+  confirmGitActionsOnMove: boolean;
   appearance: AppearanceConfig;
 }
 
@@ -482,6 +568,11 @@ export interface AppConfig {
     requireConfirmationBeforeProductionDeploy: boolean;
     createSafetyTagBeforeMerge: boolean;
     createBackupBranchBeforeMerge: boolean;
+    enableColumnHooks: boolean;
+    allowedCommands: string[];
+    hookTimeoutSeconds: number;
+    useDevBranch: boolean;
+    defaultBranchPrefix: string;
   };
 }
 
@@ -497,6 +588,8 @@ export type InboundMessageType =
   | "renameColumn"
   | "deleteColumn"
   | "moveColumn"
+  | "saveColumnConfig"
+  | "runColumnHooks"
   | "addComment"
   | "assignUser"
   | "createBranch"
@@ -556,6 +649,7 @@ export type OutboundMessageType =
   | "fileList"
   | "branchMapGraph"
   | "commitDetail"
+  | "columnHookResult"
   | "navigate"
   | "operationResult"
   | "error"

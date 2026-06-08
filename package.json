@@ -340,6 +340,42 @@
           "default": false,
           "description": "Allow force-deleting unmerged local branches (git branch -D). Off by default — unmerged branches are protected; archive them instead."
         },
+        "branchBoard.useDevBranch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use a dev/integration branch in the Git model (feature -> dev -> main). Turn off for a simpler model where feature branches merge straight into main."
+        },
+        "branchBoard.defaultBranchPrefix": {
+          "type": "string",
+          "default": "feature/",
+          "description": "Prefix applied to auto-generated feature branch names (e.g. feature/123-add-cart)."
+        },
+        "branchBoard.runGitActionsOnMove": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run Git actions driven by a column's Git stage when a task is moved into it: feature = create/checkout branch, review = push, staging = merge into the target (dev), production = the safe finish flow (push + optional merge to main)."
+        },
+        "branchBoard.confirmGitActionsOnMove": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask for confirmation before destructive move-driven Git actions (merge into dev/main). Turn off for full hands-off automation."
+        },
+        "branchBoard.enableColumnHooks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable per-column command hooks (commands run when a task enters/leaves a column). Individual hooks are still disabled until you turn them on."
+        },
+        "branchBoard.allowedCommands": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["npm", "pnpm", "yarn", "npx", "node", "git", "make"],
+          "description": "Allowlist of binaries that column hooks may run. Commands are executed without a shell; anything not on this list is refused. Keep this minimal."
+        },
+        "branchBoard.hookTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "description": "Default hard timeout (seconds) for a column hook command that does not set its own timeout. The process is killed past this limit."
+        },
         "branchBoard.devDeployCommand": {
           "type": "string",
           "default": "",

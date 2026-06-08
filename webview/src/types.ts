@@ -4,10 +4,33 @@ export type TaskStatus = "open" | "in-progress" | "done";
 
 export type TaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
+export type GitStage = "none" | "feature" | "review" | "staging" | "production";
+
+export interface ColumnHook {
+  id: string;
+  label: string;
+  command: string;
+  args: string[];
+  requireConfirm: boolean;
+  requireCleanTree: boolean;
+  continueOnError: boolean;
+  timeoutSec: number;
+  blocking: boolean;
+  enabled: boolean;
+}
+
 export interface BoardColumn {
   id: string;
   name: string;
   position: number;
+  nameEn?: string;
+  gitStage?: GitStage;
+  baseBranch?: string;
+  targetBranch?: string;
+  branchPrefix?: string;
+  wipLimit?: number;
+  onEnter?: ColumnHook[];
+  onLeave?: ColumnHook[];
 }
 
 export interface BoardUser {
@@ -395,6 +418,11 @@ export interface AppConfig {
     requireConfirmationBeforeProductionDeploy: boolean;
     createSafetyTagBeforeMerge: boolean;
     createBackupBranchBeforeMerge: boolean;
+    enableColumnHooks: boolean;
+    allowedCommands: string[];
+    hookTimeoutSeconds: number;
+    useDevBranch: boolean;
+    defaultBranchPrefix: string;
   };
 }
 

@@ -39,7 +39,39 @@
     "addTask": "Add task",
     "delete": "Delete column",
     "menu": "Column menu",
-    "notEmpty": "Column is not empty."
+    "notEmpty": "Column is not empty.",
+    "configure": "Configure commands…"
+  },
+  "gitStage": {
+    "none": "No branch",
+    "feature": "Feature (origin/branch)",
+    "review": "Code review (push + PR)",
+    "staging": "Staging (origin/dev)",
+    "production": "Production (origin/main)"
+  },
+  "columnConfig": {
+    "title": "Column configuration",
+    "nameEn": "Name (EN)",
+    "gitStage": "Git stage",
+    "baseBranch": "Base branch",
+    "targetBranch": "Target branch (merge)",
+    "branchPrefix": "Branch prefix",
+    "wipLimit": "WIP limit (0 = none)",
+    "onEnter": "Commands run ON ENTER",
+    "onLeave": "Commands run ON LEAVE",
+    "addCommand": "Add command",
+    "removeCommand": "Remove command",
+    "noCommands": "No commands yet. Add the first one.",
+    "label": "Label (e.g. Run tests)",
+    "enabled": "Enabled",
+    "blocking": "Blocking (must pass)",
+    "confirm": "Ask to confirm",
+    "cleanTree": "Require clean tree",
+    "continueOnError": "Continue on error",
+    "timeout": "Timeout (s)",
+    "notAllowed": "Command is not on the allowlist (branchBoard.allowedCommands).",
+    "securityNote": "Commands run without a shell, allowed binaries only. Variables: {{branch}} {{taskId}} {{slug}} {{baseBranch}} {{targetBranch}} {{mainBranch}}. Every run is recorded in .branchboard/audit.log.",
+    "save": "Save"
   },
   "task": {
     "add": "Add task",

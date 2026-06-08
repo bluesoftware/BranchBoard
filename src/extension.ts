@@ -71,6 +71,15 @@ function readConfig(): BranchBoardConfig {
     requireConfirmationBeforeProductionDeploy: c.get("requireConfirmationBeforeProductionDeploy", true),
     createSafetyTagBeforeMerge: c.get("createSafetyTagBeforeMerge", false),
     createBackupBranchBeforeMerge: c.get("createBackupBranchBeforeMerge", true),
+    enableColumnHooks: c.get("enableColumnHooks", true),
+    allowedCommands: c.get("allowedCommands", [
+      "npm", "pnpm", "yarn", "npx", "node", "git", "make",
+    ]) as string[],
+    hookTimeoutSeconds: c.get("hookTimeoutSeconds", 120),
+    useDevBranch: c.get("useDevBranch", true),
+    defaultBranchPrefix: c.get("defaultBranchPrefix", "feature/"),
+    runGitActionsOnMove: c.get("runGitActionsOnMove", true),
+    confirmGitActionsOnMove: c.get("confirmGitActionsOnMove", true),
     appearance: {
       compactMode: c.get("appearance.compactMode", false),
       showBranchBadges: c.get("appearance.showBranchBadges", true),
