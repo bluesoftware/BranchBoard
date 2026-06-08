@@ -2,7 +2,7 @@
   "version": 3,
   "projectName": "Topestetic.pl",
   "boardTitle": "Topestetic.pl",
-  "updatedAt": "2026-06-08T11:42:51.534Z",
+  "updatedAt": "2026-06-08T11:55:45.752Z",
   "columns": [
     {
       "id": "backlog",
@@ -144,119 +144,78 @@
   ],
   "tasks": [
     {
-      "id": "task_mq5546pp_r9cb",
-      "title": "TEST",
+      "id": "task_mq55mbwh_rpfi",
+      "title": "Nowe",
       "description": "",
-      "columnId": "done",
+      "columnId": "in-progress",
       "position": 1,
       "assignedUserId": "darek",
-      "branchName": "feature/task-ppr9cb-test",
+      "branchName": "feature/task-whrpfi-nowe",
       "priority": "none",
       "comments": [],
       "checklist": [],
-      "createdAt": "2026-06-08T11:41:15.133Z",
-      "updatedAt": "2026-06-08T11:42:51.533Z",
-      "finishedAt": "2026-06-08T11:42:51.533Z",
-      "status": "done"
+      "createdAt": "2026-06-08T11:55:21.665Z",
+      "updatedAt": "2026-06-08T11:55:45.548Z",
+      "finishedAt": null,
+      "status": "open"
     }
   ],
   "events": [
     {
-      "id": "ev_mq5546pp_kys3",
+      "id": "ev_mq55mbwh_j67i",
       "type": "task_created",
-      "taskId": "task_mq5546pp_r9cb",
+      "taskId": "task_mq55mbwh_rpfi",
       "branchName": null,
       "userId": "darek",
-      "createdAt": "2026-06-08T11:41:15.133Z",
+      "createdAt": "2026-06-08T11:55:21.665Z",
       "payload": {
-        "title": "TEST",
+        "title": "Nowe",
         "columnId": "backlog"
       }
     },
     {
-      "id": "ev_mq554dra_nojs",
+      "id": "ev_mq55mj2h_nsoa",
       "type": "branch_created",
-      "taskId": "task_mq5546pp_r9cb",
-      "branchName": "feature/task-ppr9cb-test",
+      "taskId": "task_mq55mbwh_rpfi",
+      "branchName": "feature/task-whrpfi-nowe",
       "userId": "darek",
-      "createdAt": "2026-06-08T11:41:24.262Z",
+      "createdAt": "2026-06-08T11:55:30.953Z",
       "payload": {}
     },
     {
-      "id": "ev_mq5551bc_mcrf",
+      "id": "ev_mq55ms2l_8xq4",
       "type": "task_moved",
-      "taskId": "task_mq5546pp_r9cb",
-      "branchName": "feature/task-ppr9cb-test",
+      "taskId": "task_mq55mbwh_rpfi",
+      "branchName": "feature/task-whrpfi-nowe",
       "userId": "darek",
-      "createdAt": "2026-06-08T11:41:54.792Z",
+      "createdAt": "2026-06-08T11:55:42.621Z",
       "payload": {
         "fromColumn": "BACKLOG",
         "toColumn": "TO DO",
-        "title": "TEST"
+        "title": "Nowe"
       }
     },
     {
-      "id": "ev_mq555m3l_h9ca",
+      "id": "ev_mq55mubw_xbyx",
       "type": "task_moved",
-      "taskId": "task_mq5546pp_r9cb",
-      "branchName": "feature/task-ppr9cb-test",
+      "taskId": "task_mq55mbwh_rpfi",
+      "branchName": "feature/task-whrpfi-nowe",
       "userId": "darek",
-      "createdAt": "2026-06-08T11:42:21.729Z",
+      "createdAt": "2026-06-08T11:55:45.549Z",
       "payload": {
         "fromColumn": "TO DO",
         "toColumn": "IN PROGRESS",
-        "title": "TEST"
+        "title": "Nowe"
       }
     },
     {
-      "id": "ev_mq555rrg_xbiu",
-      "type": "task_moved",
-      "taskId": "task_mq5546pp_r9cb",
-      "branchName": "feature/task-ppr9cb-test",
+      "id": "ev_mq55muhk_cb2t",
+      "type": "branch_checked_out",
+      "taskId": "task_mq55mbwh_rpfi",
+      "branchName": "feature/task-whrpfi-nowe",
       "userId": "darek",
-      "createdAt": "2026-06-08T11:42:29.068Z",
-      "payload": {
-        "fromColumn": "IN PROGRESS",
-        "toColumn": "CODE REVIEW",
-        "title": "TEST"
-      }
-    },
-    {
-      "id": "ev_mq555zyl_3tge",
-      "type": "task_moved",
-      "taskId": "task_mq5546pp_r9cb",
-      "branchName": "feature/task-ppr9cb-test",
-      "userId": "darek",
-      "createdAt": "2026-06-08T11:42:39.693Z",
-      "payload": {
-        "fromColumn": "CODE REVIEW",
-        "toColumn": "TESTING",
-        "title": "TEST"
-      }
-    },
-    {
-      "id": "ev_mq55693i_w9r6",
-      "type": "task_moved",
-      "taskId": "task_mq5546pp_r9cb",
-      "branchName": "feature/task-ppr9cb-test",
-      "userId": "darek",
-      "createdAt": "2026-06-08T11:42:51.534Z",
-      "payload": {
-        "fromColumn": "TESTING",
-        "toColumn": "DONE",
-        "title": "TEST"
-      }
-    },
-    {
-      "id": "ev_mq55693i_d9ve",
-      "type": "task_finished",
-      "taskId": "task_mq5546pp_r9cb",
-      "branchName": null,
-      "userId": "darek",
-      "createdAt": "2026-06-08T11:42:51.534Z",
-      "payload": {
-        "title": "TEST"
-      }
+      "createdAt": "2026-06-08T11:55:45.752Z",
+      "payload": {}
     }
   ],
   "deployments": []

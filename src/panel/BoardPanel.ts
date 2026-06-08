@@ -319,6 +319,153 @@ export class WebviewController {
     return this.runHookChain(toCol?.onEnter, toColumnId, taskId);
   }
 
+  /** Generate a safe feature branch name from a task + its column prefix. */
+  private branchNameFor(taskId: string, columnId: string): string {
+    const { board, getConfig } = this.deps;
+    const cfg = getConfig();
+    const task = board.getBoard().tasks.find((t) => t.id === taskId);
+    const col = board.getColumn(columnId);
+    const prefix = (col?.branchPrefix || cfg.defaultBranchPrefix || "feature/").trim();
+    const idPart = (task?.id.split("_").pop() || task?.id || "task").slice(0, 8);
+    const slug = (task?.title ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 32);
+    return `${prefix}${idPart}${slug ? `-${slug}` : ""}`.replace(/-+$/g, "");
+  }
+
+  /** Modal confirm, or auto-yes when confirmGitActionsOnMove is off. */
+  private async confirmGit(message: string, detail?: string): Promise<boolean> {
+    if (!this.deps.getConfig().confirmGitActionsOnMove) {
+      return true;
+    }
+    return (
+      (await vscode.window.showWarningMessage(message, { modal: true, detail }, "Yes")) === "Yes"
+    );
+  }
+
+  /** Run the safe finish flow for a task and apply its board side-effects. */
+  private async runFinishFlow(msg: InboundMessage, taskId: string): Promise<void> {
+    const { board, git, getConfig } = this.deps;
+    const cfg = getConfig();
+    const task = board.getBoard().tasks.find((t) => t.id === taskId);
+    if (!task || !task.branchName) {
+      return;
+    }
+    const result = await finishTaskGitFlow(git, cfg, task, {
+      confirm: (m, detail) => this.confirmGit(m, detail),
+      info: (m) => Logger.info(`[finish] ${m}`),
+    });
+    if (result.ok && result.moveToColumnId) {
+      const targetCol =
+        result.moveToColumnId === "done" ? board.findDoneColumnId() : board.findReviewColumnId();
+      await board.moveTask(task.id, targetCol, 0);
+      if (result.markDone) {
+        await board.updateTask(task.id, { status: "done", finishedAt: new Date().toISOString() });
+        await board.logEvent("merge_finished", { taskId: task.id, branchName: task.branchName });
+      }
+    } else if (!result.ok) {
+      await board.logEvent("merge_failed", { taskId: task.id, branchName: task.branchName });
+    }
+    this.reply(msg, result);
+    this.toast(result);
+    await this.postGitInfo();
+  }
+
+  /**
+   * Run the Git action implied by the destination column's gitStage:
+   *  feature    -> create or checkout the task branch
+   *  review     -> push the task branch
+   *  staging    -> merge the task branch into the target (dev) and push
+   *  production -> the safe finish flow (push + optional merge to main)
+   */
+  private async runStageGitActions(
+    msg: InboundMessage,
+    taskId: string,
+    toColumnId: string
+  ): Promise<void> {
+    const { board, git, getConfig } = this.deps;
+    const cfg = getConfig();
+    if (!(await git.isRepo())) {
+      return;
+    }
+    const col = board.getColumn(toColumnId);
+    const stage = col?.gitStage ?? "none";
+    const task = board.getBoard().tasks.find((t) => t.id === taskId);
+    if (!task) {
+      return;
+    }
+
+    if (stage === "feature") {
+      if (!task.branchName) {
+        const name = this.branchNameFor(taskId, toColumnId);
+        const res = await git.createBranch(name);
+        if (res.ok) {
+          await board.updateTask(taskId, { branchName: name });
+          await board.logEvent("branch_created", { taskId, branchName: name });
+        }
+        this.reply(msg, res);
+        this.toast(res);
+      } else {
+        const res = await git.checkoutBranch(task.branchName);
+        if (res.ok) {
+          await board.logEvent("branch_checked_out", { taskId, branchName: task.branchName });
+        }
+        this.reply(msg, res);
+        this.toast(res);
+      }
+      await this.postGitInfo();
+      return;
+    }
+
+    if (stage === "review") {
+      if (!task.branchName) {
+        this.toast({ ok: false, message: "Task has no branch — nothing to push." });
+        return;
+      }
+      const res = await git.pushBranch(task.branchName);
+      if (res.ok) {
+        await board.logEvent("branch_pushed", { taskId, branchName: task.branchName });
+      }
+      this.reply(msg, res);
+      this.toast(res);
+      await this.postGitInfo();
+      return;
+    }
+
+    if (stage === "staging") {
+      if (!task.branchName) {
+        this.toast({ ok: false, message: "Task has no branch — nothing to merge." });
+        return;
+      }
+      const target =
+        (col?.targetBranch || (cfg.useDevBranch ? cfg.devBranch : cfg.defaultMainBranch) || "dev").trim();
+      const ok = await this.confirmGit(
+        `Merge '${task.branchName}' into '${target}' and push?`,
+        "Checks out the target branch, pulls, merges --no-ff and pushes, then returns to your branch."
+      );
+      if (!ok) {
+        return;
+      }
+      const res = await git.mergeIntoBranch(target, task.branchName);
+      await board.logEvent(res.ok ? "merge_finished" : "merge_failed", {
+        taskId,
+        branchName: task.branchName,
+        payload: { target },
+      });
+      this.reply(msg, res);
+      this.toast(res);
+      await this.postGitInfo();
+      return;
+    }
+
+    if (stage === "production") {
+      await this.runFinishFlow(msg, taskId);
+      return;
+    }
+  }
+
   private async onMessage(msg: InboundMessage) {
     const { board, git, getConfig } = this.deps;
     try {
@@ -927,31 +1074,17 @@ export class WebviewController {
             }
           }
 
-          // Optional: moving into DONE runs the safe finish flow (push + optional
-          // merge to main with confirmation + backup, per Git policy). Opt-in.
+          // Git actions driven by the destination column's gitStage.
           const cfg = getConfig();
-          const enteringDone = msg.payload.toColumnId === board.findDoneColumnId();
-          const movedTask = board.getBoard().tasks.find((t) => t.id === msg.payload.taskId);
-          if (cfg.finishOnMoveToDone && enteringDone && movedTask && movedTask.branchName) {
-            const result = await finishTaskGitFlow(git, cfg, movedTask, {
-              confirm: async (m, detail) =>
-                (await vscode.window.showWarningMessage(m, { modal: true, detail }, "Yes")) === "Yes",
-              info: (m) => vscode.window.showInformationMessage(`BranchBoard: ${m}`),
-            });
-            if (result.ok && result.moveToColumnId) {
-              const targetCol =
-                result.moveToColumnId === "done" ? board.findDoneColumnId() : board.findReviewColumnId();
-              await board.moveTask(movedTask.id, targetCol, 0);
-              if (result.markDone) {
-                await board.updateTask(movedTask.id, { status: "done", finishedAt: new Date().toISOString() });
-                await board.logEvent("merge_finished", { taskId: movedTask.id, branchName: movedTask.branchName });
-              }
-            } else if (!result.ok) {
-              await board.logEvent("merge_failed", { taskId: movedTask.id, branchName: movedTask.branchName });
+          if (changingColumn && cfg.runGitActionsOnMove) {
+            await this.runStageGitActions(msg, taskId, toColumnId);
+          } else if (cfg.finishOnMoveToDone) {
+            // Legacy opt-in: only run the finish flow when stage actions are off.
+            const enteringDone = toColumnId === board.findDoneColumnId();
+            const movedTask = board.getBoard().tasks.find((t) => t.id === taskId);
+            if (enteringDone && movedTask && movedTask.branchName) {
+              await this.runFinishFlow(msg, movedTask.id);
             }
-            this.reply(msg, result);
-            this.toast(result);
-            await this.postGitInfo();
           }
           break;
         }

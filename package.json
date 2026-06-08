@@ -350,6 +350,16 @@
           "default": "feature/",
           "description": "Prefix applied to auto-generated feature branch names (e.g. feature/123-add-cart)."
         },
+        "branchBoard.runGitActionsOnMove": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run Git actions driven by a column's Git stage when a task is moved into it: feature = create/checkout branch, review = push, staging = merge into the target (dev), production = the safe finish flow (push + optional merge to main)."
+        },
+        "branchBoard.confirmGitActionsOnMove": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask for confirmation before destructive move-driven Git actions (merge into dev/main). Turn off for full hands-off automation."
+        },
         "branchBoard.enableColumnHooks": {
           "type": "boolean",
           "default": true,

@@ -40,12 +40,22 @@
   // Odświeżanie / sync
   "branchBoard.syncIntervalSeconds": 20,
 
+  // ===== Akcje Git sterowane kolumnami (pełna automatyzacja) =====
+  // Przeniesienie karty do kolumny wykonuje akcję Git wg etapu kolumny:
+  //   W trakcie   -> utwórz/checkout brancha feature/<id>-<slug>
+  //   Code review -> push brancha
+  //   Do testu    -> merge brancha do dev + push
+  //   Zrobione    -> finish flow (push + merge do main + sprzątanie)
+  "branchBoard.runGitActionsOnMove": true,
+  // Pełny hands-off: bez okien potwierdzenia przy merge na przenoszeniu
+  "branchBoard.confirmGitActionsOnMove": false,
+
   // ===== Bezpieczeństwo i flow "Zakończ zadanie" =====
   // Pełny, wygodny flow solo: Finish task pushuje, merge'uje do main i sprząta branch
   "branchBoard.allowDirectMergeToMain": true,
-  // ...ale ZAWSZE pyta o potwierdzenie przed merge (zostaw na true)
-  "branchBoard.requireConfirmationBeforeMerge": true,
-  // Nie zamknie zadania, jeśli masz niezacommitowane zmiany
+  // Pełna automatyzacja: nie pytaj przed merge do main
+  "branchBoard.requireConfirmationBeforeMerge": false,
+  // Nie zamknie zadania, jeśli masz niezacommitowane zmiany (zostawiamy jako bezpiecznik)
   "branchBoard.requireCleanWorkingTreeBeforeFinish": true,
   // Opcjonalna komenda przed zakończeniem (np. build) – pusta = pomijana
   "branchBoard.runCommandBeforeFinish": "",
@@ -54,5 +64,7 @@
   "branchBoard.deleteLocalBranchAfterMerge": true,
   "branchBoard.deleteRemoteBranchAfterMerge": true,
   "branchBoard.appearance.compactMode": false,
-  "branchBoard.aiPromptTemplate": ""
+  "branchBoard.aiPromptTemplate": "",
+  "git.autofetch": true,
+  "git.autofetchPeriod": 10
 }

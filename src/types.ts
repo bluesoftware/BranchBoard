@@ -510,6 +510,10 @@ export interface BranchBoardConfig {
   useDevBranch: boolean;
   /** Default prefix for auto-generated feature branch names. */
   defaultBranchPrefix: string;
+  /** Run Git actions (branch/checkout/push/merge) driven by a column's gitStage on move. */
+  runGitActionsOnMove: boolean;
+  /** Ask for confirmation before destructive move-driven Git actions (merge). */
+  confirmGitActionsOnMove: boolean;
   appearance: AppearanceConfig;
 }
 

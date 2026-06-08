@@ -704,6 +704,83 @@ export class GitService {
     }
   }
 
+  /**
+   * Merge `branchName` into `target` (e.g. a feature branch into dev) and push.
+   * Checks out target, pulls it, merges --no-ff, pushes, then returns to the
+   * original branch. Aborts cleanly on conflict and never deletes anything.
+   */
+  async mergeIntoBranch(target: string, branchName: string): Promise<OperationResult> {
+    const action = "mergeIntoBranch";
+    try {
+      await this.assertValidBranchName(target);
+      await this.assertValidBranchName(branchName);
+      const remote = this.getConfig().remoteName || "origin";
+      const original = await this.getCurrentBranch();
+
+      // Make sure the work is pushed before integrating.
+      try {
+        await this.run(["push", "-u", remote, branchName]);
+      } catch {
+        /* push is best-effort here; merge below uses local refs */
+      }
+
+      const co = await this.checkoutBranch(target);
+      if (!co.ok) {
+        // target may not exist locally yet — try to create it from remote.
+        try {
+          await this.run(["checkout", "-b", target, `${remote}/${target}`]);
+        } catch {
+          return { ok: false, action, message: `Could not switch to '${target}'.`, detail: co.detail };
+        }
+      }
+      try {
+        await this.run(["pull", remote, target]);
+      } catch {
+        /* target may have no upstream yet — continue with local */
+      }
+
+      try {
+        await this.run(["merge", "--no-ff", branchName, "-m", `Merge ${branchName} into ${target}`]);
+      } catch (err: any) {
+        try {
+          await this.run(["merge", "--abort"]);
+        } catch {
+          /* nothing to abort */
+        }
+        if (original) {
+          await this.run(["checkout", original]).catch(() => undefined);
+        }
+        return {
+          ok: false,
+          action,
+          message: `Merge of '${branchName}' into '${target}' failed (conflict or error). Merge aborted.`,
+          detail: err?.message,
+        };
+      }
+
+      let pushDetail = "";
+      try {
+        await this.run(["push", remote, target]);
+      } catch (err: any) {
+        pushDetail = err?.message ?? "";
+      }
+
+      // Return to the branch the user was on so their context is preserved.
+      if (original && original !== target) {
+        await this.run(["checkout", original]).catch(() => undefined);
+      }
+
+      return {
+        ok: true,
+        action,
+        message: `Merged '${branchName}' into '${target}'${pushDetail ? " (local merge; push failed)" : ` and pushed to ${remote}`}.`,
+        detail: pushDetail || undefined,
+      };
+    } catch (err: any) {
+      return { ok: false, action, message: `Merge into '${target}' failed.`, detail: err?.message };
+    }
+  }
+
   async deleteLocalBranch(branchName: string, force = false): Promise<OperationResult> {
     try {
       await this.assertValidBranchName(branchName);
