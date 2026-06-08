@@ -282,6 +282,10 @@
       "localOnlyOld": "Istnieje tylko lokalnie i nie był ruszany od dawna."
     }
   },
+  "workLog": {
+    "showAll": "Pokaż wszystko ({count})",
+    "allUsers": "Wszyscy"
+  },
   "commit": {
     "loading": "Wczytywanie szczegółów commita…",
     "copyHash": "Kopiuj hash",

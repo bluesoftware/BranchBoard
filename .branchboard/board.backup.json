@@ -2,7 +2,7 @@
   "version": 3,
   "projectName": "Leniwiec",
   "boardTitle": "LENIWIEC",
-  "updatedAt": "2026-06-07T23:48:13.101Z",
+  "updatedAt": "2026-06-07T23:49:55.927Z",
   "columns": [
     {
       "id": "app-sklep",
@@ -86,7 +86,7 @@
       "id": "task_mq4fk2dq_i8x8",
       "title": "Pierwsze",
       "description": "",
-      "columnId": "app-sklep",
+      "columnId": "app-start",
       "position": 1,
       "assignedUserId": "darek",
       "branchName": "feature/task-dqi8x8-pierwsze",
@@ -94,7 +94,7 @@
       "comments": [],
       "checklist": [],
       "createdAt": "2026-06-07T23:45:45.998Z",
-      "updatedAt": "2026-06-07T23:48:13.101Z",
+      "updatedAt": "2026-06-07T23:49:55.927Z",
       "finishedAt": null,
       "status": "open"
     }
@@ -110,6 +110,37 @@
       "payload": {
         "title": "Pierwsze",
         "columnId": "app-sklep"
+      }
+    },
+    {
+      "id": "ev_mq4fn7x7_0d2v",
+      "type": "branch_created",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-07T23:48:13.147Z",
+      "payload": {}
+    },
+    {
+      "id": "ev_mq4foufu_70vi",
+      "type": "branch_checked_out",
+      "taskId": null,
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-07T23:49:28.986Z",
+      "payload": {}
+    },
+    {
+      "id": "ev_mq4fpf87_f0j8",
+      "type": "task_moved",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-07T23:49:55.927Z",
+      "payload": {
+        "fromColumn": "APP SKLEP",
+        "toColumn": "APP START",
+        "title": "Pierwsze"
       }
     }
   ],

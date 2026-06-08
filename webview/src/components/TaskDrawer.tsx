@@ -13,8 +13,11 @@ import {
   TaskPriority,
 } from "../types";
 import { t } from "../i18n";
-import { buildAiPrompt, daysOverdue, formatDate, relativeTime, slugify, suggestBranchName } from "../utils";
+import { buildAiPrompt, formatDate, slugify, suggestBranchName } from "../utils";
 import { CopyIcon, FileIcon, SparkleIcon } from "./Icons";
+import { WorkLog } from "./task/WorkLog";
+import { Checklist } from "./task/Checklist";
+import { Comments } from "./task/Comments";
 
 interface Props {
   task: BoardTask;
@@ -69,12 +72,6 @@ const DEFAULT_AI_CHECKLIST_KEYS = [
   "cc.ai.cl.safeDev",
 ];
 
-interface WorkLogEntry {
-  time: string;
-  text: string;
-  kind: "git" | "task" | "ai" | "user";
-}
-
 const PRIORITIES: TaskPriority[] = ["none", "low", "medium", "high", "urgent"];
 
 /**
@@ -120,8 +117,6 @@ export function TaskDrawer(props: Props) {
   const [description, setDescription] = useState(task.description);
   const [acceptance, setAcceptance] = useState(task.acceptanceCriteria ?? "");
   const [branchName, setBranchName] = useState(task.branchName);
-  const [comment, setComment] = useState("");
-  const [newItem, setNewItem] = useState("");
   const [fileInput, setFileInput] = useState("");
 
   const attachedFiles = task.attachedFiles ?? [];
@@ -155,8 +150,6 @@ export function TaskDrawer(props: Props) {
   }, [task.id, task.title, task.description, task.branchName, task.acceptanceCriteria]);
 
   const checklist = task.checklist ?? [];
-  const checklistDone = checklist.filter((c) => c.done).length;
-  const progress = checklist.length ? Math.round((checklistDone / checklist.length) * 100) : 0;
 
   const saveField = (patch: Partial<BoardTask>) => props.onSave(patch);
   const saveChecklist = (items: ChecklistItem[]) => props.onSave({ checklist: items });
@@ -182,19 +175,6 @@ export function TaskDrawer(props: Props) {
       reviewChecklist: ai.reviewChecklist.map((c) => (c.id === id ? { ...c, done: !c.done } : c)),
     });
 
-  const addChecklistItem = () => {
-    const text = newItem.trim();
-    if (!text) {
-      return;
-    }
-    const item: ChecklistItem = { id: `ci_${Date.now().toString(36)}`, text, done: false };
-    saveChecklist([...checklist, item]);
-    setNewItem("");
-  };
-  const toggleItem = (id: string) =>
-    saveChecklist(checklist.map((c) => (c.id === id ? { ...c, done: !c.done } : c)));
-  const removeItem = (id: string) => saveChecklist(checklist.filter((c) => c.id !== id));
-
   const suggested = suggestBranchName(task);
   const assignee = board.users.find((u) => u.id === task.assignedUserId) ?? null;
   const gitEnabled = !!git?.isRepo;
@@ -212,47 +192,6 @@ export function TaskDrawer(props: Props) {
     props.onCopyClipboard(text, t("toast.aiPromptCopied"));
     props.onAiPromptCopied();
   };
-
-  const timeLabels = { now: t("cc.time.now"), m: t("cc.time.m"), h: t("cc.time.h"), d: t("cc.time.d") };
-
-  // Last 5 work entries: branch commits + task events, newest first.
-  const eventText = (e: BoardEvent): string => {
-    const params = {
-      user: board.users.find((u) => u.id === e.userId)?.name ?? "",
-      branch: e.branchName ?? "",
-      title: (e.payload?.title as string) ?? task.title,
-      fromColumn: (e.payload?.fromColumn as string) ?? "",
-      toColumn: (e.payload?.toColumn as string) ?? "",
-    };
-    return t(`cc.event.${e.type}`, params);
-  };
-  const workLog: WorkLogEntry[] = [
-    ...props.branchCommits.map((c) => ({
-      time: c.date,
-      text: c.subject || c.shortHash,
-      kind: "git" as const,
-    })),
-    ...props.events
-      .filter((e) => e.taskId === task.id)
-      .map((e) => ({
-        time: e.createdAt,
-        text: eventText(e),
-        kind: (e.type === "comment_added"
-          ? "user"
-          : e.type === "ai_prompt_copied"
-            ? "ai"
-            : e.type.startsWith("branch") || e.type.startsWith("merge")
-              ? "git"
-              : "task") as WorkLogEntry["kind"],
-      })),
-  ]
-    .filter((e) => e.time)
-    .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-    .slice(0, 5);
-
-  const isDone = task.status === "done";
-  const overdue = isDone ? null : daysOverdue(task.dueDate);
-  const lastActivityAt = workLog[0]?.time ?? task.updatedAt;
 
   // Deployment context for this task's branch.
   const policy = appConfig.policy;
@@ -299,49 +238,7 @@ export function TaskDrawer(props: Props) {
 
         <div className="bb-drawer-body">
           {/* 1 ── Context: work log + history + overdue (TOP) */}
-          <div className="bb-card bb-context">
-            <SectionHead
-              title={t("task.context")}
-              help={t("task.help.context")}
-              right={
-                overdue !== null && overdue > 0 ? (
-                  <span className="bb-due-badge overdue">{t("task.overdueBy", { days: overdue })}</span>
-                ) : overdue !== null && overdue === 0 ? (
-                  <span className="bb-due-badge due">{t("task.dueToday")}</span>
-                ) : overdue !== null && overdue < 0 ? (
-                  <span className="bb-due-badge ok">{t("task.dueIn", { days: -overdue })}</span>
-                ) : (
-                  <span className="bb-worklog-last">{relativeTime(lastActivityAt, timeLabels)}</span>
-                )
-              }
-            />
-            {workLog.length === 0 ? (
-              <div className="bb-muted small">{t("task.noWorkLog")}</div>
-            ) : (
-              <ul className="bb-worklog-list">
-                {workLog.map((w, i) => (
-                  <li key={i} className={`bb-worklog-item kind-${w.kind}`}>
-                    <span className="bb-worklog-dot" />
-                    <span className="bb-worklog-text">{w.text}</span>
-                    <span className="bb-worklog-time">{relativeTime(w.time, timeLabels)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="bb-history-row">
-              <span title={t("task.help.created")}>
-                {t("task.created")}: <strong>{formatDate(task.createdAt)}</strong>
-              </span>
-              <span title={t("task.help.updated")}>
-                {t("task.updated")}: <strong>{formatDate(task.updatedAt)}</strong>
-              </span>
-              {task.finishedAt && (
-                <span title={t("task.help.finished")}>
-                  {t("task.finished")}: <strong>{formatDate(task.finishedAt)}</strong>
-                </span>
-              )}
-            </div>
-          </div>
+          <WorkLog task={task} events={props.events} branchCommits={props.branchCommits} users={board.users} />
 
           {/* 2 ── Changed files on the branch (code-review priority) */}
           {gitEnabled && branchName && (
@@ -819,99 +716,10 @@ export function TaskDrawer(props: Props) {
           </div>
 
           {/* 8 ── Checklist */}
-          <div className="bb-card">
-            <SectionHead
-              title={t("task.checklist")}
-              help={t("task.help.checklist")}
-              right={checklist.length > 0 ? <span className="bb-count">{checklistDone}/{checklist.length}</span> : null}
-            />
-            {checklist.length > 0 && (
-              <div className="bb-progress">
-                <span style={{ width: `${progress}%` }} />
-              </div>
-            )}
-            <div className="bb-checklist">
-              {checklist.map((c) => (
-                <div key={c.id} className="bb-check-item">
-                  <button
-                    className={`bb-check square ${c.done ? "checked" : ""}`}
-                    onClick={() => toggleItem(c.id)}
-                  >
-                    {c.done ? "✓" : ""}
-                  </button>
-                  <span className={`bb-check-text ${c.done ? "done" : ""}`}>{c.text}</span>
-                  <button className="bb-iconbtn" onClick={() => removeItem(c.id)} title={t("common.delete")}>
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="bb-comment-add">
-              <input
-                className="bb-input"
-                value={newItem}
-                placeholder={t("task.checklistItem")}
-                onChange={(e) => setNewItem(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addChecklistItem()}
-              />
-              <button className="bb-btn" disabled={!newItem.trim()} onClick={addChecklistItem}>
-                {t("task.addItem")}
-              </button>
-            </div>
-          </div>
+          <Checklist items={checklist} onChange={saveChecklist} />
 
           {/* 9 ── Comments */}
-          <div className="bb-card">
-            <SectionHead
-              title={t("task.comments")}
-              help={t("task.help.comments")}
-              right={<span className="bb-count">{task.comments.length}</span>}
-            />
-            <div className="bb-comments">
-              {task.comments.length === 0 && <div className="bb-muted small">{t("task.noComments")}</div>}
-              {task.comments.map((c) => {
-                const author = board.users.find((u) => u.id === c.authorId);
-                return (
-                  <div key={c.id} className="bb-comment">
-                    <span className="bb-avatar small" style={{ background: author?.color ?? "#555" }}>
-                      {author?.avatarText ?? "?"}
-                    </span>
-                    <div className="bb-comment-body">
-                      <div className="bb-comment-head">
-                        <strong>{author?.name ?? "Unknown"}</strong>
-                        <span className="bb-muted small">{formatDate(c.createdAt)}</span>
-                      </div>
-                      <div>{c.text}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="bb-comment-add">
-              <input
-                className="bb-input"
-                value={comment}
-                placeholder={t("task.commentPlaceholder")}
-                onChange={(e) => setComment(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && comment.trim()) {
-                    props.onAddComment(comment.trim());
-                    setComment("");
-                  }
-                }}
-              />
-              <button
-                className="bb-btn"
-                disabled={!comment.trim()}
-                onClick={() => {
-                  props.onAddComment(comment.trim());
-                  setComment("");
-                }}
-              >
-                {t("task.comment")}
-              </button>
-            </div>
-          </div>
+          <Comments comments={task.comments} users={board.users} onAdd={props.onAddComment} />
         </div>
 
         <div className="bb-drawer-foot">

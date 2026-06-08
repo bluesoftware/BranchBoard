@@ -381,6 +381,63 @@ export function App() {
   const activeBranchFilesLoading =
     !!activeTask && !!activeTask.branchName && branchDetailLoading && !detailMatches;
 
+  // Task editor as a top-level overlay — rendered over ANY page so opening a
+  // task never forces a switch to the board view.
+  const renderTaskDrawer = () => {
+    if (!activeTask) {
+      return null;
+    }
+    return (
+      <TaskDrawer
+        task={activeTask}
+        board={board}
+        git={git}
+        appConfig={appConfig}
+        currentUserId={currentUserId}
+        events={board.events}
+        branchCommits={activeBranchCommits}
+        branchFiles={activeBranchFiles}
+        branchFilesLoading={activeBranchFilesLoading}
+        onClose={() => setActiveTaskId(null)}
+        onSave={(patch) => post("updateTask", { id: activeTask.id, patch })}
+        onDelete={() => {
+          post("deleteTask", { id: activeTask.id, title: activeTask.title });
+          setActiveTaskId(null);
+        }}
+        onAssign={(userId) => post("assignUser", { taskId: activeTask.id, userId })}
+        onAddComment={(text) => post("addComment", { taskId: activeTask.id, authorId: currentUserId, text })}
+        onCreateBranch={(branchName) => post("createBranch", { taskId: activeTask.id, branchName })}
+        onCheckoutBranch={(branchName) => post("checkoutBranch", { branchName })}
+        onPushBranch={(branchName) => post("pushBranch", { branchName })}
+        onFinishTask={() => post("finishTask", { taskId: activeTask.id })}
+        onMergeToMain={() => post("mergeToMain", { taskId: activeTask.id })}
+        onCopyClipboard={(text, label) => {
+          post("copyToClipboard", { text, label });
+          pushToast("success", label);
+        }}
+        onAiPromptCopied={() =>
+          post("logEvent", {
+            type: "ai_prompt_copied",
+            taskId: activeTask.id,
+            branchName: activeTask.branchName || null,
+            payload: { title: activeTask.title },
+          })
+        }
+        onDeployDev={() => post("deployDev", { taskId: activeTask.id })}
+        onDeployProduction={() => post("deployProduction", { taskId: activeTask.id })}
+        onMarkTested={() => post("markTested", { taskId: activeTask.id })}
+        onCreateBackup={() => post("createBackupBranch", { branchName: activeTask.branchName })}
+        onCreateSafetyTag={() => post("createSafetyTag", { taskId: activeTask.id })}
+        onRevertLastCommit={() => post("revertLastCommit", { branchName: activeTask.branchName })}
+        onOpenExternal={(url) => post("openExternal", { url })}
+        onOpenFile={(path) => post("openFile", { path })}
+        onOpenDiff={(path) => post("openDiff", { branchName: activeTask.branchName, path })}
+        fileSuggestions={fileSuggestions}
+        onSearchFiles={(query) => post("searchFiles", { query })}
+      />
+    );
+  };
+
   if (page === "command") {
     return (
       <div className={appClass}>
@@ -428,6 +485,7 @@ export function App() {
           onLinkBranch={(taskId, branchName) => post("updateTask", { id: taskId, patch: { branchName } })}
           onBulkDeleteLocal={(branches) => post("bulkDeleteLocalBranches", { branches })}
         />
+        {renderTaskDrawer()}
         {settingsOpen && renderSettings()}
       </div>
     );
@@ -487,6 +545,7 @@ export function App() {
             pushToast("success", label);
           }}
         />
+        {renderTaskDrawer()}
         {settingsOpen && renderSettings()}
       </div>
     );
@@ -524,6 +583,7 @@ export function App() {
           onCheckout={(branchName) => post("checkoutBranch", { branchName })}
           onUpdateFromMain={() => post("updateBranchFromMain", { strategy: appConfig.policy.updateBranchStrategy })}
         />
+        {renderTaskDrawer()}
         {settingsOpen && renderSettings()}
       </div>
     );
@@ -586,59 +646,7 @@ export function App() {
         />
       )}
 
-      {activeTask && (
-        <TaskDrawer
-          task={activeTask}
-          board={board}
-          git={git}
-          appConfig={appConfig}
-          currentUserId={currentUserId}
-          events={board.events}
-          branchCommits={activeBranchCommits}
-          branchFiles={activeBranchFiles}
-          branchFilesLoading={activeBranchFilesLoading}
-          onClose={() => setActiveTaskId(null)}
-          onSave={(patch) => post("updateTask", { id: activeTask.id, patch })}
-          onDelete={() => {
-            post("deleteTask", { id: activeTask.id, title: activeTask.title });
-            setActiveTaskId(null);
-          }}
-          onAssign={(userId) => post("assignUser", { taskId: activeTask.id, userId })}
-          onAddComment={(text) =>
-            post("addComment", { taskId: activeTask.id, authorId: currentUserId, text })
-          }
-          onCreateBranch={(branchName) => post("createBranch", { taskId: activeTask.id, branchName })}
-          onCheckoutBranch={(branchName) => post("checkoutBranch", { branchName })}
-          onPushBranch={(branchName) => post("pushBranch", { branchName })}
-          onFinishTask={() => post("finishTask", { taskId: activeTask.id })}
-          onMergeToMain={() => post("mergeToMain", { taskId: activeTask.id })}
-          onCopyClipboard={(text, label) => {
-            post("copyToClipboard", { text, label });
-            pushToast("success", label);
-          }}
-          onAiPromptCopied={() =>
-            post("logEvent", {
-              type: "ai_prompt_copied",
-              taskId: activeTask.id,
-              branchName: activeTask.branchName || null,
-              payload: { title: activeTask.title },
-            })
-          }
-          onDeployDev={() => post("deployDev", { taskId: activeTask.id })}
-          onDeployProduction={() => post("deployProduction", { taskId: activeTask.id })}
-          onMarkTested={() => post("markTested", { taskId: activeTask.id })}
-          onCreateBackup={() => post("createBackupBranch", { branchName: activeTask.branchName })}
-          onCreateSafetyTag={() => post("createSafetyTag", { taskId: activeTask.id })}
-          onRevertLastCommit={() => post("revertLastCommit", { branchName: activeTask.branchName })}
-          onOpenExternal={(url) => post("openExternal", { url })}
-          onOpenFile={(path) => post("openFile", { path })}
-          onOpenDiff={(path) =>
-            post("openDiff", { branchName: activeTask.branchName, path })
-          }
-          fileSuggestions={fileSuggestions}
-          onSearchFiles={(query) => post("searchFiles", { query })}
-        />
-      )}
+      {renderTaskDrawer()}
 
       {settingsOpen && renderSettings()}
     </div>
