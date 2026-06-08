@@ -12,6 +12,8 @@ import {
 } from "../types";
 import { BoardService } from "../services/BoardService";
 import { GitService, finishTaskGitFlow } from "../services/GitService";
+import { CommandRunnerService, HookContext } from "../services/CommandRunnerService";
+import { ColumnHook } from "../types";
 import { BranchAnalyticsService } from "../services/BranchAnalyticsService";
 import { DashboardService } from "../services/DashboardService";
 import { DeploymentService } from "../services/DeploymentService";
@@ -71,6 +73,7 @@ export class WebviewController {
   private notifSub: (() => void) | undefined;
   private configSub: vscode.Disposable | undefined;
   private readonly analytics: BranchAnalyticsService;
+  private readonly runner: CommandRunnerService;
   /** Set once the webview requests dashboard data, so we keep it live on changes. */
   private dashboardRequested = false;
   /** Page to navigate to once the webview signals "ready". */
@@ -81,6 +84,7 @@ export class WebviewController {
     private readonly deps: ControllerDeps
   ) {
     this.analytics = new BranchAnalyticsService(this.deps.git);
+    this.runner = new CommandRunnerService(this.deps.git.getCwd(), this.deps.getConfig);
     this.webview.options = {
       enableScripts: true,
       localResourceRoots: [
@@ -166,6 +170,11 @@ export class WebviewController {
         requireConfirmationBeforeProductionDeploy: c.requireConfirmationBeforeProductionDeploy,
         createSafetyTagBeforeMerge: c.createSafetyTagBeforeMerge,
         createBackupBranchBeforeMerge: c.createBackupBranchBeforeMerge,
+        enableColumnHooks: c.enableColumnHooks,
+        allowedCommands: c.allowedCommands,
+        hookTimeoutSeconds: c.hookTimeoutSeconds,
+        useDevBranch: c.useDevBranch,
+        defaultBranchPrefix: c.defaultBranchPrefix,
       },
     };
     this.post({ type: "appConfig", payload });
@@ -235,6 +244,79 @@ export class WebviewController {
   navigate(page: CommandCenterPage) {
     this.pendingPage = page;
     this.post({ type: "navigate", payload: { page } });
+  }
+
+  /** Build the {{token}} substitution context for a task's hooks. */
+  private async buildHookContext(taskId: string, columnId: string): Promise<HookContext> {
+    const { board, git, getConfig } = this.deps;
+    const data = board.getBoard();
+    const task = data.tasks.find((t) => t.id === taskId);
+    const col = board.getColumn(columnId);
+    const cfg = getConfig();
+    const info = await git.getInfo();
+    const user = data.users.find((u) => u.id === task?.assignedUserId);
+    const slug = (task?.title ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    return {
+      branch: task?.branchName ?? "",
+      taskId: task?.id ?? "",
+      taskTitle: task?.title ?? "",
+      slug,
+      baseBranch: col?.baseBranch ?? (cfg.useDevBranch ? cfg.devBranch : info.mainBranch),
+      targetBranch: col?.targetBranch ?? info.mainBranch,
+      mainBranch: info.mainBranch,
+      columnId,
+      columnName: col?.name ?? columnId,
+      user: user?.name ?? "",
+    };
+  }
+
+  /** Run a list of hooks, posting each result to the webview + Output log. */
+  private async runHookChain(
+    hooks: ColumnHook[] | undefined,
+    columnId: string,
+    taskId: string
+  ): Promise<boolean> {
+    if (!hooks || hooks.length === 0) {
+      return false;
+    }
+    const ctx = await this.buildHookContext(taskId, columnId);
+    const { git } = this.deps;
+    const outcome = await this.runner.runHooks(hooks, ctx, {
+      confirm: async (hook, preview) =>
+        (await vscode.window.showWarningMessage(
+          `Run column command "${hook.label}"?`,
+          { modal: true, detail: preview },
+          "Run"
+        )) === "Run",
+      isWorkingTreeClean: async () => !(await git.hasUncommittedChanges()),
+      onLog: (line) => Logger.info(`[hook] ${line}`),
+    });
+    for (const r of outcome.results) {
+      this.post({ type: "columnHookResult", payload: { columnId, taskId, result: r } });
+      if (!r.ok && !r.skipped) {
+        this.toast({ ok: false, message: `${r.label}: ${r.message}` });
+      }
+    }
+    return outcome.blocked;
+  }
+
+  /** onLeave (from-column) then onEnter (to-column). Returns true if blocked. */
+  private async runColumnMoveHooks(
+    taskId: string,
+    fromColumnId: string,
+    toColumnId: string
+  ): Promise<boolean> {
+    const fromCol = this.deps.board.getColumn(fromColumnId);
+    const toCol = this.deps.board.getColumn(toColumnId);
+    const leftBlocked = await this.runHookChain(fromCol?.onLeave, fromColumnId, taskId);
+    if (leftBlocked) {
+      return true;
+    }
+    return this.runHookChain(toCol?.onEnter, toColumnId, taskId);
   }
 
   private async onMessage(msg: InboundMessage) {
@@ -801,7 +883,50 @@ export class WebviewController {
         }
 
         case "moveTask": {
-          await board.moveTask(msg.payload.taskId, msg.payload.toColumnId, msg.payload.toIndex);
+          const { taskId, toColumnId, toIndex } = msg.payload;
+          const before = board.getBoard().tasks.find((t) => t.id === taskId);
+          const fromColumnId = before?.columnId;
+          const fromIndex = (before?.position ?? 1) - 1;
+          const changingColumn = !!fromColumnId && fromColumnId !== toColumnId;
+
+          // WIP-limit gate: ask before exceeding a column's limit.
+          if (changingColumn) {
+            const wip = board.wipStatus(toColumnId);
+            if (wip.wouldExceed) {
+              const colName = board.getColumn(toColumnId)?.name ?? toColumnId;
+              const proceed =
+                (await vscode.window.showWarningMessage(
+                  `Column "${colName}" is at its WIP limit (${wip.limit}).`,
+                  { modal: true, detail: "Move the task here anyway?" },
+                  "Move anyway"
+                )) === "Move anyway";
+              if (!proceed) {
+                this.postBoard(board.getBoard()); // revert optimistic UI move
+                break;
+              }
+            }
+          }
+
+          await board.moveTask(taskId, toColumnId, toIndex);
+
+          // Column command hooks: onLeave (from) then onEnter (to). A blocking
+          // failure reverts the move so the board stays consistent.
+          if (changingColumn && getConfig().enableColumnHooks) {
+            const blocked = await this.runColumnMoveHooks(taskId, fromColumnId!, toColumnId);
+            if (blocked) {
+              await board.moveTask(taskId, fromColumnId!, fromIndex);
+              this.postBoard(board.getBoard());
+              const r = {
+                ok: false,
+                action: "moveTask",
+                message: "A blocking column command failed — the task was moved back.",
+              };
+              this.reply(msg, r);
+              this.toast(r);
+              break;
+            }
+          }
+
           // Optional: moving into DONE runs the safe finish flow (push + optional
           // merge to main with confirmation + backup, per Git policy). Opt-in.
           const cfg = getConfig();
@@ -850,6 +975,26 @@ export class WebviewController {
         case "moveColumn":
           await board.moveColumn(msg.payload.orderedIds);
           break;
+
+        case "saveColumnConfig": {
+          await board.saveColumnConfig(msg.payload.id, msg.payload.patch ?? {});
+          this.reply(msg, { ok: true, action: "saveColumnConfig", message: "Column updated." });
+          break;
+        }
+
+        case "runColumnHooks": {
+          const { columnId, taskId, trigger } = msg.payload;
+          const col = board.getColumn(columnId);
+          const hooks = trigger === "onLeave" ? col?.onLeave : col?.onEnter;
+          const blocked = await this.runHookChain(hooks, columnId, taskId ?? "");
+          this.reply(msg, {
+            ok: !blocked,
+            action: "runColumnHooks",
+            message: blocked ? "A blocking command failed." : "Commands finished.",
+          });
+          await this.postGitInfo();
+          break;
+        }
 
         case "addComment":
           await board.addComment(msg.payload.taskId, msg.payload.authorId, msg.payload.text);

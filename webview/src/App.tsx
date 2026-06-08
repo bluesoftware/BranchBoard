@@ -19,6 +19,7 @@ import { Board } from "./components/Board";
 import { TaskDrawer } from "./components/TaskDrawer";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { Onboarding } from "./components/Onboarding";
+import { ColumnConfigModal } from "./components/ColumnConfigModal";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { BranchMapPage } from "./pages/BranchMapPage";
 import { CurrentBranchPage } from "./pages/CurrentBranchPage";
@@ -71,6 +72,11 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     requireConfirmationBeforeProductionDeploy: true,
     createSafetyTagBeforeMerge: false,
     createBackupBranchBeforeMerge: true,
+    enableColumnHooks: true,
+    allowedCommands: ["npm", "pnpm", "yarn", "npx", "node", "git", "make"],
+    hookTimeoutSeconds: 120,
+    useDevBranch: true,
+    defaultBranchPrefix: "feature/",
   },
 };
 
@@ -82,6 +88,7 @@ export function App() {
   const [filter, setFilter] = useState<UserFilter>("all");
   const [search, setSearch] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [configColumnId, setConfigColumnId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [page, setPage] = useState<Page>("board");
@@ -637,6 +644,7 @@ export function App() {
           }
           onRenameColumn={(id, name) => post("renameColumn", { id, name })}
           onDeleteColumn={(id) => post("deleteColumn", { id })}
+          onConfigureColumn={(id) => setConfigColumnId(id)}
           onMoveColumn={(orderedIds) => post("moveColumn", { orderedIds })}
           onToggleDone={(task) =>
             post("updateTask", {
@@ -653,6 +661,21 @@ export function App() {
       {renderTaskDrawer()}
 
       {settingsOpen && renderSettings()}
+
+      {configColumnId && board && (() => {
+        const col = board.columns.find((c) => c.id === configColumnId);
+        if (!col) {
+          return null;
+        }
+        return (
+          <ColumnConfigModal
+            column={col}
+            allowedCommands={appConfig.policy.allowedCommands}
+            onClose={() => setConfigColumnId(null)}
+            onSave={(id, patch) => post("saveColumnConfig", { id, patch })}
+          />
+        );
+      })()}
     </div>
   );
 }

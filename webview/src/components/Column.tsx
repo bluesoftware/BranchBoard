@@ -19,6 +19,7 @@ interface Props {
   onToggleDone: (task: BoardTask) => void;
   onRenameColumn: (id: string, name: string) => void;
   onDeleteColumn: (id: string) => void;
+  onConfigureColumn: (id: string) => void;
   onCheckout: (branchName: string) => void;
   onPush: (branchName: string) => void;
   onFinish: (taskId: string) => void;
@@ -104,7 +105,19 @@ export function Column(props: Props) {
             {column.name}
           </span>
         )}
-        <span className="bb-column-count">{tasks.length}</span>
+        {column.gitStage && column.gitStage !== "none" && (
+          <span className={`bb-stage-badge stage-${column.gitStage}`} title={t(`gitStage.${column.gitStage}`)}>
+            {t(`gitStage.${column.gitStage}`)}
+          </span>
+        )}
+        <span
+          className={`bb-column-count ${
+            column.wipLimit && tasks.length >= column.wipLimit ? "wip-full" : ""
+          }`}
+          title={column.wipLimit ? `WIP ${tasks.length}/${column.wipLimit}` : undefined}
+        >
+          {column.wipLimit ? `${tasks.length}/${column.wipLimit}` : tasks.length}
+        </span>
         <div className="bb-column-menu" ref={menuRef}>
           <button className="bb-iconbtn" onClick={() => setMenuOpen((o) => !o)} title={t("column.menu")}>
             ⋯
@@ -128,6 +141,15 @@ export function Column(props: Props) {
                 }}
               >
                 {t("column.addTask")}
+              </button>
+              <button
+                className="bb-menu-item"
+                onClick={() => {
+                  props.onConfigureColumn(column.id);
+                  setMenuOpen(false);
+                }}
+              >
+                {t("column.configure")}
               </button>
               <div className="bb-menu-sep" />
               <button

@@ -408,6 +408,44 @@ export class BoardService {
     return { ok: true };
   }
 
+  getColumn(id: string): BoardColumn | undefined {
+    return this.getBoard().columns.find((c) => c.id === id);
+  }
+
+  /**
+   * Persist column configuration (git stage, base/target branch, prefix, WIP
+   * limit, and command hooks). Only known config fields are written; id and
+   * position are preserved.
+   */
+  async saveColumnConfig(id: string, patch: Partial<BoardColumn>): Promise<BoardColumn | undefined> {
+    const col = this.getColumn(id);
+    if (!col) {
+      return undefined;
+    }
+    const allowed: (keyof BoardColumn)[] = [
+      "name", "nameEn", "gitStage", "baseBranch", "targetBranch",
+      "branchPrefix", "wipLimit", "onEnter", "onLeave",
+    ];
+    for (const key of allowed) {
+      if (key in patch) {
+        (col as any)[key] = (patch as any)[key];
+      }
+    }
+    await this.persist();
+    return col;
+  }
+
+  /**
+   * WIP status for a column. `exceeded` is true when adding one more task
+   * would break the limit (limit of 0/undefined means unlimited).
+   */
+  wipStatus(columnId: string): { limit: number; count: number; wouldExceed: boolean } {
+    const board = this.getBoard();
+    const limit = board.columns.find((c) => c.id === columnId)?.wipLimit ?? 0;
+    const count = board.tasks.filter((t) => t.columnId === columnId).length;
+    return { limit, count, wouldExceed: limit > 0 && count >= limit };
+  }
+
   /** Reorder columns given the full ordered list of column ids. */
   async moveColumn(orderedIds: string[]): Promise<void> {
     const board = this.getBoard();

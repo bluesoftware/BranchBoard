@@ -1,4 +1,18 @@
-import { BoardData } from "../types";
+import { BoardData, ColumnHook } from "../types";
+
+/** Build a column hook with safe defaults (disabled until the user opts in). */
+function hook(partial: Partial<ColumnHook> & { id: string; label: string; command: string }): ColumnHook {
+  return {
+    args: [],
+    requireConfirm: true,
+    requireCleanTree: false,
+    continueOnError: false,
+    timeoutSec: 120,
+    blocking: false,
+    enabled: false,
+    ...partial,
+  };
+}
 
 /**
  * Abstraction over where the board lives. The MVP ships a local-JSON
@@ -45,14 +59,7 @@ export function createDefaultBoard(
     projectName,
     boardTitle,
     updatedAt: now,
-    columns: [
-      { id: "app-sklep", name: "APP SKLEP", position: 1 },
-      { id: "app-start", name: "APP START", position: 2 },
-      { id: "koszyk", name: "KOSZYK", position: 3 },
-      { id: "konto", name: "KONTO", position: 4 },
-      { id: "do-testu", name: "DO TESTU", position: 5 },
-      { id: "done", name: "ZROBIONE", position: 99 },
-    ],
+    columns: GIT_FLOW_COLUMNS_PL.map((c) => ({ ...c })),
     users,
     tasks: [],
     events: [],
@@ -60,18 +67,80 @@ export function createDefaultBoard(
   };
 }
 
+/**
+ * Default board mapped onto the Git lifecycle. Columns are workflow stages
+ * (status), not feature areas — feature areas live as task labels/impact areas.
+ * Sample hooks are included but DISABLED, so nothing runs until the user
+ * reviews and enables them.
+ *
+ *   Backlog / To Do  -> no branch
+ *   W trakcie        -> feature/<id-slug> cut from dev  (origin/<branch>)
+ *   Code review      -> branch pushed; PR feature/* -> dev
+ *   Do testu         -> integrated into dev            (origin/dev, staging)
+ *   Zrobione         -> released into main             (origin/main, production)
+ */
+export const GIT_FLOW_COLUMNS_PL: BoardData["columns"] = [
+  { id: "backlog", name: "BACKLOG", nameEn: "Backlog", position: 1, gitStage: "none" },
+  { id: "todo", name: "DO ZROBIENIA", nameEn: "To Do", position: 2, gitStage: "none" },
+  {
+    id: "in-progress",
+    name: "W TRAKCIE",
+    nameEn: "In Progress",
+    position: 3,
+    gitStage: "feature",
+    baseBranch: "dev",
+    branchPrefix: "feature/",
+    wipLimit: 3,
+    onEnter: [
+      hook({ id: "h-deps", label: "Instaluj zależności / Install deps", command: "npm", args: ["install"] }),
+    ],
+  },
+  {
+    id: "review",
+    name: "CODE REVIEW",
+    nameEn: "Code Review",
+    position: 4,
+    gitStage: "review",
+    targetBranch: "dev",
+    onEnter: [
+      hook({ id: "h-lint", label: "Lint", command: "npm", args: ["run", "lint"], blocking: true }),
+    ],
+  },
+  {
+    id: "testing",
+    name: "DO TESTU",
+    nameEn: "Testing",
+    position: 5,
+    gitStage: "staging",
+    targetBranch: "dev",
+    onEnter: [
+      hook({ id: "h-test", label: "Testy / Tests", command: "npm", args: ["test"], blocking: true }),
+    ],
+  },
+  {
+    id: "done",
+    name: "ZROBIONE",
+    nameEn: "Done",
+    position: 99,
+    gitStage: "production",
+    targetBranch: "main",
+    onEnter: [
+      hook({ id: "h-build", label: "Build", command: "npm", args: ["run", "build"], blocking: true }),
+    ],
+  },
+];
+
+/** English-labelled equivalent used when the board is created in EN. */
+export const GIT_FLOW_COLUMNS_EN: BoardData["columns"] = GIT_FLOW_COLUMNS_PL.map((c) => ({
+  ...c,
+  name: (c.nameEn || c.name).toUpperCase(),
+}));
+
 /** Current on-disk board schema version. Bumped when the shape changes. */
 export const BOARD_SCHEMA_VERSION = 3;
 
 /** Hard cap on stored events so board.json never grows unbounded. */
 export const MAX_STORED_EVENTS = 300;
 
-/** Standard column set used by the onboarding "Create board" flow. */
-export const ONBOARDING_COLUMNS: BoardData["columns"] = [
-  { id: "backlog", name: "BACKLOG", position: 1 },
-  { id: "todo", name: "TODO", position: 2 },
-  { id: "in-progress", name: "IN PROGRESS", position: 3 },
-  { id: "review", name: "REVIEW", position: 4 },
-  { id: "testing", name: "TESTING", position: 5 },
-  { id: "done", name: "DONE", position: 99 },
-];
+/** Standard column set used by the onboarding "Create board" flow (Git-mapped). */
+export const ONBOARDING_COLUMNS: BoardData["columns"] = GIT_FLOW_COLUMNS_EN.map((c) => ({ ...c }));

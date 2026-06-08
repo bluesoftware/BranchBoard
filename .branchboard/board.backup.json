@@ -1,38 +1,122 @@
 {
   "version": 3,
-  "projectName": "Leniwiec",
-  "boardTitle": "LENIWIEC",
-  "updatedAt": "2026-06-08T00:15:48.624Z",
+  "projectName": "Topestetic.pl",
+  "boardTitle": "Topestetic.pl",
+  "updatedAt": "2026-06-08T11:41:24.220Z",
   "columns": [
     {
-      "id": "app-sklep",
-      "name": "APP SKLEP",
-      "position": 1
+      "id": "backlog",
+      "name": "BACKLOG",
+      "nameEn": "Backlog",
+      "position": 1,
+      "gitStage": "none"
     },
     {
-      "id": "app-start",
-      "name": "APP START",
-      "position": 2
+      "id": "todo",
+      "name": "TO DO",
+      "nameEn": "To Do",
+      "position": 2,
+      "gitStage": "none"
     },
     {
-      "id": "koszyk",
-      "name": "KOSZYK",
-      "position": 3
+      "id": "in-progress",
+      "name": "IN PROGRESS",
+      "nameEn": "In Progress",
+      "position": 3,
+      "gitStage": "feature",
+      "baseBranch": "dev",
+      "branchPrefix": "feature/",
+      "wipLimit": 3,
+      "onEnter": [
+        {
+          "args": [
+            "install"
+          ],
+          "requireConfirm": true,
+          "requireCleanTree": false,
+          "continueOnError": false,
+          "timeoutSec": 120,
+          "blocking": false,
+          "enabled": false,
+          "id": "h-deps",
+          "label": "Instaluj zależności / Install deps",
+          "command": "npm"
+        }
+      ]
     },
     {
-      "id": "konto",
-      "name": "KONTO",
-      "position": 4
+      "id": "review",
+      "name": "CODE REVIEW",
+      "nameEn": "Code Review",
+      "position": 4,
+      "gitStage": "review",
+      "targetBranch": "dev",
+      "onEnter": [
+        {
+          "args": [
+            "run",
+            "lint"
+          ],
+          "requireConfirm": true,
+          "requireCleanTree": false,
+          "continueOnError": false,
+          "timeoutSec": 120,
+          "blocking": true,
+          "enabled": false,
+          "id": "h-lint",
+          "label": "Lint",
+          "command": "npm"
+        }
+      ]
     },
     {
-      "id": "do-testu",
-      "name": "DO TESTU",
-      "position": 5
+      "id": "testing",
+      "name": "TESTING",
+      "nameEn": "Testing",
+      "position": 5,
+      "gitStage": "staging",
+      "targetBranch": "dev",
+      "onEnter": [
+        {
+          "args": [
+            "test"
+          ],
+          "requireConfirm": true,
+          "requireCleanTree": false,
+          "continueOnError": false,
+          "timeoutSec": 120,
+          "blocking": true,
+          "enabled": false,
+          "id": "h-test",
+          "label": "Testy / Tests",
+          "command": "npm"
+        }
+      ]
     },
     {
       "id": "done",
-      "name": "ZROBIONE",
-      "position": 99
+      "name": "DONE",
+      "nameEn": "Done",
+      "position": 99,
+      "gitStage": "production",
+      "targetBranch": "main",
+      "onEnter": [
+        {
+          "args": [
+            "run",
+            "build"
+          ],
+          "requireConfirm": true,
+          "requireCleanTree": false,
+          "continueOnError": false,
+          "timeoutSec": 120,
+          "blocking": true,
+          "enabled": false,
+          "id": "h-build",
+          "label": "Build",
+          "command": "npm"
+        }
+      ]
     }
   ],
   "users": [
@@ -60,170 +144,35 @@
   ],
   "tasks": [
     {
-      "id": "task_mq1o5tnc_mwjy",
+      "id": "task_mq5546pp_r9cb",
       "title": "TEST",
-      "description": "TEST",
-      "columnId": "done",
-      "position": 1,
-      "assignedUserId": "darek",
-      "branchName": "feature/c_mwjy-test",
-      "comments": [
-        {
-          "id": "c_mq1o7r8q",
-          "authorId": "darek",
-          "text": "TEST",
-          "createdAt": "2026-06-06T01:24:49.706Z"
-        }
-      ],
-      "checklist": [],
-      "createdAt": "2026-06-06T01:23:19.512Z",
-      "updatedAt": "2026-06-06T01:28:12.701Z",
-      "finishedAt": "2026-06-06T01:28:12.701Z",
-      "status": "done",
-      "priority": "none"
-    },
-    {
-      "id": "task_mq4fk2dq_i8x8",
-      "title": "Pierwsze",
       "description": "",
-      "columnId": "konto",
+      "columnId": "backlog",
       "position": 1,
       "assignedUserId": "darek",
-      "branchName": "feature/task-dqi8x8-pierwsze",
+      "branchName": "feature/task-ppr9cb-test",
       "priority": "none",
       "comments": [],
-      "checklist": [
-        {
-          "id": "ci_mq4gm2n8",
-          "text": "test",
-          "done": false
-        }
-      ],
-      "createdAt": "2026-06-07T23:45:45.998Z",
-      "updatedAt": "2026-06-08T00:15:48.624Z",
+      "checklist": [],
+      "createdAt": "2026-06-08T11:41:15.133Z",
+      "updatedAt": "2026-06-08T11:41:24.220Z",
       "finishedAt": null,
       "status": "open"
     }
   ],
   "events": [
     {
-      "id": "ev_mq4fk2dq_4gyo",
+      "id": "ev_mq5546pp_kys3",
       "type": "task_created",
-      "taskId": "task_mq4fk2dq_i8x8",
+      "taskId": "task_mq5546pp_r9cb",
       "branchName": null,
       "userId": "darek",
-      "createdAt": "2026-06-07T23:45:45.998Z",
+      "createdAt": "2026-06-08T11:41:15.133Z",
       "payload": {
-        "title": "Pierwsze",
-        "columnId": "app-sklep"
-      }
-    },
-    {
-      "id": "ev_mq4fn7x7_0d2v",
-      "type": "branch_created",
-      "taskId": "task_mq4fk2dq_i8x8",
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "userId": "darek",
-      "createdAt": "2026-06-07T23:48:13.147Z",
-      "payload": {}
-    },
-    {
-      "id": "ev_mq4foufu_70vi",
-      "type": "branch_checked_out",
-      "taskId": null,
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "userId": "darek",
-      "createdAt": "2026-06-07T23:49:28.986Z",
-      "payload": {}
-    },
-    {
-      "id": "ev_mq4fpf87_f0j8",
-      "type": "task_moved",
-      "taskId": "task_mq4fk2dq_i8x8",
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "userId": "darek",
-      "createdAt": "2026-06-07T23:49:55.927Z",
-      "payload": {
-        "fromColumn": "APP SKLEP",
-        "toColumn": "APP START",
-        "title": "Pierwsze"
-      }
-    },
-    {
-      "id": "ev_mq4fphsr_417h",
-      "type": "task_moved",
-      "taskId": "task_mq4fk2dq_i8x8",
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "userId": "darek",
-      "createdAt": "2026-06-07T23:49:59.259Z",
-      "payload": {
-        "fromColumn": "APP START",
-        "toColumn": "APP SKLEP",
-        "title": "Pierwsze"
-      }
-    },
-    {
-      "id": "ev_mq4gims8_q9xi",
-      "type": "branch_pushed",
-      "taskId": null,
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "userId": "darek",
-      "createdAt": "2026-06-08T00:12:38.744Z",
-      "payload": {}
-    },
-    {
-      "id": "ev_mq4gmjn9_d3gd",
-      "type": "task_moved",
-      "taskId": "task_mq4fk2dq_i8x8",
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "userId": "darek",
-      "createdAt": "2026-06-08T00:15:41.301Z",
-      "payload": {
-        "fromColumn": "APP SKLEP",
-        "toColumn": "APP START",
-        "title": "Pierwsze"
-      }
-    },
-    {
-      "id": "ev_mq4gmnwu_f2x8",
-      "type": "task_moved",
-      "taskId": "task_mq4fk2dq_i8x8",
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "userId": "darek",
-      "createdAt": "2026-06-08T00:15:46.830Z",
-      "payload": {
-        "fromColumn": "APP START",
-        "toColumn": "KOSZYK",
-        "title": "Pierwsze"
-      }
-    },
-    {
-      "id": "ev_mq4gmpao_w2n3",
-      "type": "task_moved",
-      "taskId": "task_mq4fk2dq_i8x8",
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "userId": "darek",
-      "createdAt": "2026-06-08T00:15:48.624Z",
-      "payload": {
-        "fromColumn": "KOSZYK",
-        "toColumn": "KONTO",
-        "title": "Pierwsze"
+        "title": "TEST",
+        "columnId": "backlog"
       }
     }
   ],
-  "deployments": [
-    {
-      "id": "dep_mq4gizk6",
-      "taskId": "task_mq4fk2dq_i8x8",
-      "branchName": "feature/task-dqi8x8-pierwsze",
-      "environment": "dev",
-      "status": "deployed",
-      "url": "",
-      "deployedBy": "Darek",
-      "deployedAt": "2026-06-08T00:12:55.304Z",
-      "command": "(manual)",
-      "logSummary": "Marked as tested without a deploy command.",
-      "tested": true
-    }
-  ]
+  "deployments": []
 }
