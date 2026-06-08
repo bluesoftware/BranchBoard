@@ -498,6 +498,7 @@ export function App() {
           board={board}
           dashboard={dashboard}
           appConfig={appConfig}
+          git={git}
           currentUserId={currentUserId}
           page="branchMap"
           branchDetail={branchDetail}
@@ -562,6 +563,9 @@ export function App() {
           currentUserId={currentUserId}
           page="currentBranch"
           branchDetail={branchDetail}
+          events={board.events}
+          onSaveChecklist={(taskId, items) => post("updateTask", { id: taskId, patch: { checklist: items } })}
+          onAddComment={(taskId, text) => post("addComment", { taskId, authorId: currentUserId, text })}
           onNavigate={navigateTo}
           onOpenSettings={() => setSettingsOpen(true)}
           onRefresh={() => post("getDashboardData")}
