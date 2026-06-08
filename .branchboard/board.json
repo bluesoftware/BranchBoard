@@ -2,7 +2,7 @@
   "version": 3,
   "projectName": "Topestetic.pl",
   "boardTitle": "Topestetic.pl",
-  "updatedAt": "2026-06-08T11:41:24.262Z",
+  "updatedAt": "2026-06-08T11:42:51.534Z",
   "columns": [
     {
       "id": "backlog",
@@ -147,7 +147,7 @@
       "id": "task_mq5546pp_r9cb",
       "title": "TEST",
       "description": "",
-      "columnId": "backlog",
+      "columnId": "done",
       "position": 1,
       "assignedUserId": "darek",
       "branchName": "feature/task-ppr9cb-test",
@@ -155,9 +155,9 @@
       "comments": [],
       "checklist": [],
       "createdAt": "2026-06-08T11:41:15.133Z",
-      "updatedAt": "2026-06-08T11:41:24.220Z",
-      "finishedAt": null,
-      "status": "open"
+      "updatedAt": "2026-06-08T11:42:51.533Z",
+      "finishedAt": "2026-06-08T11:42:51.533Z",
+      "status": "done"
     }
   ],
   "events": [
@@ -181,6 +181,82 @@
       "userId": "darek",
       "createdAt": "2026-06-08T11:41:24.262Z",
       "payload": {}
+    },
+    {
+      "id": "ev_mq5551bc_mcrf",
+      "type": "task_moved",
+      "taskId": "task_mq5546pp_r9cb",
+      "branchName": "feature/task-ppr9cb-test",
+      "userId": "darek",
+      "createdAt": "2026-06-08T11:41:54.792Z",
+      "payload": {
+        "fromColumn": "BACKLOG",
+        "toColumn": "TO DO",
+        "title": "TEST"
+      }
+    },
+    {
+      "id": "ev_mq555m3l_h9ca",
+      "type": "task_moved",
+      "taskId": "task_mq5546pp_r9cb",
+      "branchName": "feature/task-ppr9cb-test",
+      "userId": "darek",
+      "createdAt": "2026-06-08T11:42:21.729Z",
+      "payload": {
+        "fromColumn": "TO DO",
+        "toColumn": "IN PROGRESS",
+        "title": "TEST"
+      }
+    },
+    {
+      "id": "ev_mq555rrg_xbiu",
+      "type": "task_moved",
+      "taskId": "task_mq5546pp_r9cb",
+      "branchName": "feature/task-ppr9cb-test",
+      "userId": "darek",
+      "createdAt": "2026-06-08T11:42:29.068Z",
+      "payload": {
+        "fromColumn": "IN PROGRESS",
+        "toColumn": "CODE REVIEW",
+        "title": "TEST"
+      }
+    },
+    {
+      "id": "ev_mq555zyl_3tge",
+      "type": "task_moved",
+      "taskId": "task_mq5546pp_r9cb",
+      "branchName": "feature/task-ppr9cb-test",
+      "userId": "darek",
+      "createdAt": "2026-06-08T11:42:39.693Z",
+      "payload": {
+        "fromColumn": "CODE REVIEW",
+        "toColumn": "TESTING",
+        "title": "TEST"
+      }
+    },
+    {
+      "id": "ev_mq55693i_w9r6",
+      "type": "task_moved",
+      "taskId": "task_mq5546pp_r9cb",
+      "branchName": "feature/task-ppr9cb-test",
+      "userId": "darek",
+      "createdAt": "2026-06-08T11:42:51.534Z",
+      "payload": {
+        "fromColumn": "TESTING",
+        "toColumn": "DONE",
+        "title": "TEST"
+      }
+    },
+    {
+      "id": "ev_mq55693i_d9ve",
+      "type": "task_finished",
+      "taskId": "task_mq5546pp_r9cb",
+      "branchName": null,
+      "userId": "darek",
+      "createdAt": "2026-06-08T11:42:51.534Z",
+      "payload": {
+        "title": "TEST"
+      }
     }
   ],
   "deployments": []
