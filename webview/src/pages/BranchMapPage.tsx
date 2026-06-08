@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AppConfig, BoardData, BranchDetail, BranchFlowRow, BranchMapGraph, CommitDetail, DashboardData } from "../types";
+import { AppConfig, BoardData, BranchDetail, BranchFlowRow, BranchMapGraph, CommitDetail, DashboardData, GitInfo } from "../types";
 import { t } from "../i18n";
 import { relativeTime } from "../utils";
 import { AppView } from "../components/navigation/MainNav";
@@ -31,6 +31,7 @@ interface Props {
   board: BoardData;
   dashboard: DashboardData | null;
   appConfig: AppConfig;
+  git: GitInfo | null;
   currentUserId: string | null;
   page: AppView;
   branchDetail: BranchDetail | null;
@@ -98,7 +99,9 @@ export function BranchMapPage(props: Props) {
   const header = (
     <PageHeader
       page={props.page}
-      title={t("branchMap.title")}
+      board={board}
+      git={props.git}
+      appConfig={props.appConfig}
       onNavigate={props.onNavigate}
       onOpenSettings={props.onOpenSettings}
       onRefresh={props.onRefresh}

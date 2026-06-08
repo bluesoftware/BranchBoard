@@ -2034,3 +2034,43 @@ select.bb-input {
 }
 .bb-garden-sprout-glyph { font-size: 40px; line-height: 1; }
 .bb-garden-sprout-title { font-size: 14px; font-weight: 600; }
+
+/* Generic modal (work log "show all", etc.) */
+.bb-modal-overlay {
+  position: fixed; inset: 0; z-index: 80;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.bb-modal {
+  width: min(620px, 96vw); max-height: 80vh; display: flex; flex-direction: column;
+  background: var(--bb-surface); border: 1px solid var(--bb-border-strong);
+  border-radius: var(--bb-radius-lg); box-shadow: var(--bb-shadow-lg); overflow: hidden;
+}
+.bb-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--bb-border); }
+.bb-modal-filters { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--bb-border); }
+.bb-modal-filters .bb-input { flex: 1; }
+.bb-modal-body { overflow-y: auto; padding: 12px 14px; }
+
+/* =========================================================================
+   Responsive — narrow webview / sidebar
+   ========================================================================= */
+.bb-topbar { flex-wrap: wrap; row-gap: 6px; }
+.bb-mainnav { flex-wrap: wrap; }
+.bb-topbar .bb-search { min-width: 120px; }
+
+@media (max-width: 720px) {
+  .bb-topbar { padding: 8px 12px; }
+  .bb-topbar-spacer { display: none; }
+  .bb-mainnav { order: 3; width: 100%; }
+  .bb-nav-btn { padding: 5px 9px; font-size: 12px; }
+  .bb-project { display: none; }
+  .bb-search { flex: 1; min-width: 100px; }
+  .bb-metric-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .bb-cc-body, .bb-page-body { padding: 12px; }
+}
+
+@media (max-width: 480px) {
+  .bb-storage-chip { display: none; }
+  .bb-metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .bb-tabs { font-size: 12px; }
+}

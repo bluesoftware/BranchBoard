@@ -2,7 +2,7 @@
   "version": 3,
   "projectName": "Leniwiec",
   "boardTitle": "LENIWIEC",
-  "updatedAt": "2026-06-07T23:45:45.998Z",
+  "updatedAt": "2026-06-08T00:15:48.624Z",
   "columns": [
     {
       "id": "app-sklep",
@@ -86,15 +86,21 @@
       "id": "task_mq4fk2dq_i8x8",
       "title": "Pierwsze",
       "description": "",
-      "columnId": "app-sklep",
+      "columnId": "konto",
       "position": 1,
       "assignedUserId": "darek",
-      "branchName": "",
+      "branchName": "feature/task-dqi8x8-pierwsze",
       "priority": "none",
       "comments": [],
-      "checklist": [],
+      "checklist": [
+        {
+          "id": "ci_mq4gm2n8",
+          "text": "test",
+          "done": false
+        }
+      ],
       "createdAt": "2026-06-07T23:45:45.998Z",
-      "updatedAt": "2026-06-07T23:45:45.998Z",
+      "updatedAt": "2026-06-08T00:15:48.624Z",
       "finishedAt": null,
       "status": "open"
     }
@@ -111,7 +117,113 @@
         "title": "Pierwsze",
         "columnId": "app-sklep"
       }
+    },
+    {
+      "id": "ev_mq4fn7x7_0d2v",
+      "type": "branch_created",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-07T23:48:13.147Z",
+      "payload": {}
+    },
+    {
+      "id": "ev_mq4foufu_70vi",
+      "type": "branch_checked_out",
+      "taskId": null,
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-07T23:49:28.986Z",
+      "payload": {}
+    },
+    {
+      "id": "ev_mq4fpf87_f0j8",
+      "type": "task_moved",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-07T23:49:55.927Z",
+      "payload": {
+        "fromColumn": "APP SKLEP",
+        "toColumn": "APP START",
+        "title": "Pierwsze"
+      }
+    },
+    {
+      "id": "ev_mq4fphsr_417h",
+      "type": "task_moved",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-07T23:49:59.259Z",
+      "payload": {
+        "fromColumn": "APP START",
+        "toColumn": "APP SKLEP",
+        "title": "Pierwsze"
+      }
+    },
+    {
+      "id": "ev_mq4gims8_q9xi",
+      "type": "branch_pushed",
+      "taskId": null,
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-08T00:12:38.744Z",
+      "payload": {}
+    },
+    {
+      "id": "ev_mq4gmjn9_d3gd",
+      "type": "task_moved",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-08T00:15:41.301Z",
+      "payload": {
+        "fromColumn": "APP SKLEP",
+        "toColumn": "APP START",
+        "title": "Pierwsze"
+      }
+    },
+    {
+      "id": "ev_mq4gmnwu_f2x8",
+      "type": "task_moved",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-08T00:15:46.830Z",
+      "payload": {
+        "fromColumn": "APP START",
+        "toColumn": "KOSZYK",
+        "title": "Pierwsze"
+      }
+    },
+    {
+      "id": "ev_mq4gmpao_w2n3",
+      "type": "task_moved",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "userId": "darek",
+      "createdAt": "2026-06-08T00:15:48.624Z",
+      "payload": {
+        "fromColumn": "KOSZYK",
+        "toColumn": "KONTO",
+        "title": "Pierwsze"
+      }
     }
   ],
-  "deployments": []
+  "deployments": [
+    {
+      "id": "dep_mq4gizk6",
+      "taskId": "task_mq4fk2dq_i8x8",
+      "branchName": "feature/task-dqi8x8-pierwsze",
+      "environment": "dev",
+      "status": "deployed",
+      "url": "",
+      "deployedBy": "Darek",
+      "deployedAt": "2026-06-08T00:12:55.304Z",
+      "command": "(manual)",
+      "logSummary": "Marked as tested without a deploy command.",
+      "tested": true
+    }
+  ]
 }

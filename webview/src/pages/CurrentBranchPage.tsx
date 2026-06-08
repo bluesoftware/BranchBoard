@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AppConfig, BoardData, BranchDetail, BranchFlowRow, DashboardData, GitInfo } from "../types";
+import { AppConfig, BoardData, BoardEvent, BranchDetail, BranchFlowRow, ChecklistItem, DashboardData, GitInfo } from "../types";
 import { t } from "../i18n";
 import { formatDate, relativeTime } from "../utils";
 import { AppView } from "../components/navigation/MainNav";
@@ -9,6 +9,9 @@ import { Tooltip } from "../components/common/Tooltip";
 import { HelpIcon } from "../components/common/HelpIcon";
 import { EmptyState } from "../components/common/EmptyState";
 import { FileIcon } from "../components/Icons";
+import { WorkLog } from "../components/task/WorkLog";
+import { Checklist } from "../components/task/Checklist";
+import { Comments } from "../components/task/Comments";
 
 interface Props {
   board: BoardData;
@@ -18,7 +21,10 @@ interface Props {
   currentUserId: string | null;
   page: AppView;
   branchDetail: BranchDetail | null;
+  events: BoardEvent[];
   onNavigate: (view: AppView) => void;
+  onSaveChecklist: (taskId: string, items: ChecklistItem[]) => void;
+  onAddComment: (taskId: string, text: string) => void;
   onOpenSettings: () => void;
   onRefresh: () => void;
   onRequestBranchDetail: (branchName: string) => void;
@@ -74,7 +80,9 @@ export function CurrentBranchPage(props: Props) {
   const header = (
     <PageHeader
       page={props.page}
-      title={t("currentBranch.title")}
+      board={board}
+      git={git}
+      appConfig={props.appConfig}
       onNavigate={props.onNavigate}
       onOpenSettings={props.onOpenSettings}
       onRefresh={() => {
@@ -220,7 +228,10 @@ export function CurrentBranchPage(props: Props) {
           </div>
         )}
 
-        {/* Has task → summary + flow */}
+        {/* Has task → history + summary + flow + checklist + comments */}
+        {task && (
+          <WorkLog task={task} events={props.events} branchCommits={commits} users={board.users} />
+        )}
         {task && (
           <div className="bb-card">
             <div className="bb-cb-head">
@@ -264,6 +275,13 @@ export function CurrentBranchPage(props: Props) {
                 })}
             </div>
           </div>
+        )}
+
+        {task && (
+          <Checklist items={task.checklist ?? []} onChange={(items) => props.onSaveChecklist(task.id, items)} />
+        )}
+        {task && (
+          <Comments comments={task.comments} users={board.users} onAdd={(text) => props.onAddComment(task.id, text)} />
         )}
 
         {/* Actions */}
