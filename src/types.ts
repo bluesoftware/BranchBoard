@@ -7,6 +7,12 @@ export type TaskStatus = "open" | "in-progress" | "done";
 
 export type TaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
+/** Type of work — drives the branch prefix (feature/, bugfix/, …). */
+export type TaskType = "feature" | "bugfix" | "hotfix" | "chore" | "refactor" | "docs";
+
+/** All selectable task types, in display order. */
+export const TASK_TYPES: TaskType[] = ["feature", "bugfix", "hotfix", "chore", "refactor", "docs"];
+
 /**
  * Where a column sits in the Git lifecycle. Drives branch naming + merge
  * targets and lets the board reason about "what does main/dev/feature mean here".
@@ -91,6 +97,8 @@ export interface BoardUser {
   email: string;
   avatarText: string;
   color: string;
+  /** Optional profile photo, stored as a data URL (e.g. "data:image/png;base64,..."). */
+  avatarPhoto?: string;
 }
 
 export interface TaskComment {
@@ -115,6 +123,8 @@ export interface BoardTask {
   assignedUserId: string | null;
   branchName: string;
   priority: TaskPriority;
+  /** Type of work; determines the branch prefix. Defaults to "feature". */
+  taskType?: TaskType;
   comments: TaskComment[];
   checklist: ChecklistItem[];
   createdAt: string;
@@ -173,6 +183,39 @@ export interface BoardEvent {
   payload?: Record<string, unknown>;
 }
 
+/* ---------- Persisted, per-user notifications ---------- */
+
+export type NotificationType =
+  | "task_created"
+  | "comment_added"
+  | "assigned_to_you"
+  | "branch_pushed"
+  | "merge_finished"
+  | "merge_failed"
+  | "task_moved_to_review"
+  | "task_done";
+
+/**
+ * A persisted notification entry, stored on the board so every user has a
+ * durable, synced read-state (not just an in-memory toast). `recipientUserIds`
+ * decides who it's meant for; `readBy` tracks who has seen it.
+ */
+export interface BoardNotificationRecord {
+  id: string;
+  type: NotificationType;
+  taskId: string | null;
+  branchName: string | null;
+  /** Board user who triggered the event (excluded from recipients). */
+  actorUserId: string | null;
+  /** Users this notification is meant for. */
+  recipientUserIds: string[];
+  /** Users who have marked this notification as read. */
+  readBy: string[];
+  title: string;
+  message: string;
+  createdAt: string;
+}
+
 export type DeploymentEnvironment = "dev" | "staging" | "production";
 export type DeploymentStatus = "not_deployed" | "deploying" | "deployed" | "failed";
 
@@ -203,6 +246,8 @@ export interface BoardData {
   events: BoardEvent[];
   /** Deployment records (DEV/staging/production). */
   deployments: Deployment[];
+  /** Persisted, per-user notifications (capped, newest last). */
+  notifications: BoardNotificationRecord[];
   /** Bumped on every save so external watchers can detect change ordering. */
   updatedAt?: string;
 }
@@ -462,6 +507,8 @@ export interface BranchBoardConfig {
   sshPort: number;
   sqliteRemotePath: string;
   sshKeyPath: string;
+  /** Allow overwriting a non-empty server board with an empty one. Data-loss guard; default false. */
+  serverAllowEmptyOverwrite: boolean;
   defaultMainBranch: string;
   remoteName: string;
   autoDetectGitUser: boolean;
@@ -515,6 +562,7 @@ export interface BranchBoardConfig {
   /** Ask for confirmation before destructive move-driven Git actions (merge). */
   confirmGitActionsOnMove: boolean;
   appearance: AppearanceConfig;
+  notifications: NotificationSettings;
 }
 
 /** UI appearance toggles, mirrored to the webview. */
@@ -527,6 +575,28 @@ export interface AppearanceConfig {
   showPriority: boolean;
   reduceAnimations: boolean;
 }
+
+/** Per-type notification toggles, mirrored to the webview. */
+export interface NotificationSettings {
+  enabled: boolean;
+  showToast: boolean;
+  notifyTaskCreated: boolean;
+  notifyCommentAdded: boolean;
+  notifyAssigned: boolean;
+  notifyBranchPushed: boolean;
+  notifyMergeFinished: boolean;
+  notifyMergeFailed: boolean;
+  notifyTaskMovedToReview: boolean;
+  notifyTaskDone: boolean;
+  /** Play a sound alongside the bell/toast when a notification arrives. */
+  soundEnabled: boolean;
+  /** id of the selected sound, matches a key in NOTIFICATION_SOUNDS. */
+  soundId: string;
+}
+
+/** Built-in notification sound files, bundled locally (no CDN). */
+export const NOTIFICATION_SOUND_IDS = ["mail-alert", "bells", "double-beep"] as const;
+export type NotificationSoundId = (typeof NOTIFICATION_SOUND_IDS)[number];
 
 /** Snapshot of config the webview needs to render correctly. */
 export interface AppConfig {
@@ -545,6 +615,9 @@ export interface AppConfig {
     sqliteRemotePath: string;
   };
   appearance: AppearanceConfig;
+  notifications: NotificationSettings;
+  /** webview-resolved URIs for the bundled notification sounds, keyed by id. */
+  soundFiles: Record<string, string>;
   policy: {
     allowDirectMergeToMain: boolean;
     requireConfirmationBeforeMerge: boolean;
@@ -573,6 +646,12 @@ export interface AppConfig {
     hookTimeoutSeconds: number;
     useDevBranch: boolean;
     defaultBranchPrefix: string;
+    /** Dev/integration branch (managed by the staging column), mirrors the host setting. */
+    devBranch: string;
+    /** Whether moving a task between columns triggers the column's Git automation. */
+    runGitActionsOnMove: boolean;
+    /** Whether move-driven Git actions ask for confirmation before running. */
+    confirmGitActionsOnMove: boolean;
   };
 }
 
@@ -607,6 +686,7 @@ export type InboundMessageType =
   | "createBoard"
   | "addUser"
   | "deleteUser"
+  | "updateUser"
   | "syncNow"
   | "getDashboardData"
   | "getBranchDetail"
@@ -624,6 +704,7 @@ export type InboundMessageType =
   | "createBackupBranch"
   | "createSafetyTag"
   | "revertLastCommit"
+  | "revertFromOrigin"
   | "deleteLocalBranch"
   | "deleteRemoteBranch"
   | "archiveBranch"
@@ -631,6 +712,8 @@ export type InboundMessageType =
   | "testConnection"
   | "showLogs"
   | "logEvent"
+  | "markNotificationRead"
+  | "markAllNotificationsRead"
   | "refresh";
 
 export interface InboundMessage {

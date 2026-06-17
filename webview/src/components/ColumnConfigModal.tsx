@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { BoardColumn, ColumnHook, GitStage } from "../types";
+import { AppConfig, BoardColumn, ColumnHook, GitStage } from "../types";
 import { t } from "../i18n";
+import { describeColumnAutomation } from "../columnAutomation";
 
 interface Props {
   column: BoardColumn;
   allowedCommands: string[];
+  policy: AppConfig["policy"];
   onClose: () => void;
   onSave: (id: string, patch: Partial<BoardColumn>) => void;
 }
@@ -38,6 +40,17 @@ export function ColumnConfigModal(props: Props) {
   const [onLeave, setOnLeave] = useState<ColumnHook[]>(column.onLeave ?? []);
 
   const commandKnown = (cmd: string) => allowedCommands.includes(cmd.trim());
+
+  // Live preview of the built-in Git automation for the stage/branches currently being
+  // edited (not yet saved), so the user sees the effect of their changes immediately.
+  const draftColumn: BoardColumn = {
+    ...column,
+    gitStage,
+    baseBranch: baseBranch.trim() || undefined,
+    targetBranch: targetBranch.trim() || undefined,
+    branchPrefix: branchPrefix.trim() || undefined,
+  };
+  const automation = describeColumnAutomation(draftColumn, props.policy);
 
   const save = () => {
     props.onSave(column.id, {
@@ -169,6 +182,23 @@ export function ColumnConfigModal(props: Props) {
               <input type="number" min={0} className="bb-input" value={wipLimit} onChange={(e) => setWipLimit(Number(e.target.value) || 0)} />
             </label>
           </div>
+
+          <div className={`bb-cc-automation ${automation.disabled ? "warn" : ""}`}>
+            <div className="bb-cc-automation-head">
+              <strong>{t("columnConfig.automation.title")}</strong>
+              {automation.branchLabel && (
+                <span className="bb-cc-automation-branch">{automation.branchLabel}</span>
+              )}
+            </div>
+            <p>{automation.description}</p>
+            {automation.disabled && (
+              <p className="bb-cc-automation-warning">
+                ⚠ {t("columnConfig.automation.disabledWarning")}
+              </p>
+            )}
+          </div>
+
+          <div className="bb-cc-note">{t("columnConfig.automation.customNote")}</div>
 
           {renderHookList(onEnter, setOnEnter, "columnConfig.onEnter")}
           {renderHookList(onLeave, setOnLeave, "columnConfig.onLeave")}

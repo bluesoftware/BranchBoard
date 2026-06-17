@@ -102,9 +102,11 @@ export function BranchMapPage(props: Props) {
       board={board}
       git={props.git}
       appConfig={props.appConfig}
+      currentUserId={currentUserId}
       onNavigate={props.onNavigate}
       onOpenSettings={props.onOpenSettings}
       onRefresh={props.onRefresh}
+      onOpenTask={props.onOpenTask}
     />
   );
 

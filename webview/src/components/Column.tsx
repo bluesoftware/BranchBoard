@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DragEvent as ReactDragEvent } from "react";
 import { AppConfig, BoardColumn, BoardTask, BoardUser, GitInfo } from "../types";
 import { t } from "../i18n";
+import { describeColumnAutomation } from "../columnAutomation";
 import { TaskCard } from "./TaskCard";
 
 interface Props {
@@ -105,11 +106,20 @@ export function Column(props: Props) {
             {column.name}
           </span>
         )}
-        {column.gitStage && column.gitStage !== "none" && (
-          <span className={`bb-stage-badge stage-${column.gitStage}`} title={t(`gitStage.${column.gitStage}`)}>
-            {t(`gitStage.${column.gitStage}`)}
-          </span>
-        )}
+        {column.gitStage && column.gitStage !== "none" && (() => {
+          const auto = describeColumnAutomation(column, props.appConfig.policy);
+          const tooltip = auto.disabled
+            ? `${auto.description}\n⚠ ${t("columnConfig.automation.disabledWarning")}`
+            : auto.description;
+          return (
+            <span
+              className={`bb-stage-badge stage-${column.gitStage} ${auto.disabled ? "stage-disabled" : ""}`}
+              title={tooltip}
+            >
+              {auto.branchLabel ?? t(`gitStage.badge.${column.gitStage}`)}
+            </span>
+          );
+        })()}
         <span
           className={`bb-column-count ${
             column.wipLimit && tasks.length >= column.wipLimit ? "wip-full" : ""

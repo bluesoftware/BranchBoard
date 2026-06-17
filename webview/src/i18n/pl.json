@@ -16,6 +16,9 @@
     "filter": "Filtr",
     "you": "Ty",
     "searchPlaceholder": "Szukaj zadań, branchy, komentarzy…",
+    "inactive": "Nieaktywne",
+    "showInactive": "Pokaż nieaktywne zadania",
+    "hideInactive": "Ukryj nieaktywne zadania",
     "addColumn": "Kolumna",
     "columnName": "Nazwa kolumny",
     "refresh": "Odśwież",
@@ -47,7 +50,14 @@
     "feature": "Feature (origin/branch)",
     "review": "Code review (push + PR)",
     "staging": "Staging (origin/dev)",
-    "production": "Produkcja (origin/main)"
+    "production": "Produkcja (origin/main)",
+    "badge": {
+      "none": "Bez brancha",
+      "feature": "Branch lokalny",
+      "review": "Branch na origin",
+      "staging": "Origin dev",
+      "production": "Origin main"
+    }
   },
   "columnConfig": {
     "title": "Konfiguracja kolumny",
@@ -71,7 +81,18 @@
     "timeout": "Limit (s)",
     "notAllowed": "Komenda spoza listy dozwolonych (branchBoard.allowedCommands).",
     "securityNote": "Komendy uruchamiane są bez powłoki, tylko dozwolone binaria. Zmienne: {{branch}} {{taskId}} {{slug}} {{baseBranch}} {{targetBranch}} {{mainBranch}}. Każde uruchomienie trafia do .branchboard/audit.log.",
-    "save": "Zapisz"
+    "save": "Zapisz",
+    "automation": {
+      "title": "Wbudowana automatyka Git tej kolumny",
+      "customNote": "Poniższe komendy (onEnter/onLeave) to dodatkowe, własne kroki (np. lint, testy) — uruchamiają się obok automatyki Git opisanej powyżej, niezależnie od niej.",
+      "disabledWarning": "Automatyczne akcje Git po przenoszeniu zadań są wyłączone w ustawieniach (branchBoard.runGitActionsOnMove). Włącz tę opcję, aby poniższy opis faktycznie się wykonywał.",
+      "feature": "Gdy zadanie trafi do tej kolumny: jeśli nie ma jeszcze brancha, zostanie utworzony nowy branch z prefiksem \"{prefix}\" od bieżącej gałęzi; jeśli branch już istnieje, zostanie wybrany (checkout).",
+      "review": "Gdy zadanie trafi do tej kolumny: branch zadania zostanie wypchnięty (push) do {remote}, aby można było otworzyć Pull Request.",
+      "staging": "Gdy zadanie trafi do tej kolumny: branch zadania zostanie bezpiecznie scalony (merge --no-ff) do {branch} i wypchnięty do {remote}.",
+      "productionMerge": "Gdy zadanie trafi do tej kolumny: branch zadania zostanie wypchnięty, a po Twoim potwierdzeniu bezpiecznie scalony do {branch} (checkout → pull → merge --no-ff → push) i przeniesiony do kolumny ZROBIONE.",
+      "productionNoMerge": "Gdy zadanie trafi do tej kolumny: branch zadania zostanie wypchnięty, ale scalanie do {branch} jest WYŁĄCZONE (branchBoard.allowDirectMergeToMain = false) — zadanie zostanie przeniesione do kolumny DO TESTU bez scalania do main.",
+      "none": "Ta kolumna nie ma przypisanego żadnego etapu Git — żadna automatyka nie zostanie uruchomiona."
+    }
   },
   "task": {
     "add": "Dodaj zadanie",
@@ -98,6 +119,8 @@
     "unassigned": "Nieprzypisane",
     "status": "Status",
     "priority": "Priorytet",
+    "type": "Typ zadania",
+    "typeLockedHint": "Typ wpływa na nazwę brancha. Branch już istnieje, więc typu nie można zmienić.",
     "column": "Kolumna / status",
     "gitBranch": "Branch Git",
     "checklist": "Lista zadań",
@@ -154,6 +177,7 @@
       "details": "Pola opisujące zadanie. Zasilają widok Zespół, filtry, ryzyko i liczenie terminu.",
       "assignee": "Kto odpowiada za zadanie. Używane w widoku Zespół i filtrze „Moje”.",
       "priority": "Ważność zadania — pomaga ustalić kolejność pracy.",
+      "type": "Typ pracy: feature, bugfix, hotfix, chore, refactor lub docs. Decyduje o prefiksie brancha (np. feature/…, bugfix/…).",
       "status": "Stan zadania: otwarte, w toku, zrobione.",
       "column": "Kolumna na tablicy = etap workflow (np. review, testy). Na tej podstawie liczone są metryki i ryzyko.",
       "dueDate": "Termin. Na jego podstawie liczymy „przeterminowane o X dni”.",
@@ -186,6 +210,7 @@
       "tag": "Utwórz tag bezpieczeństwa na bieżącym main.",
       "copyRollback": "Skopiuj gotowe komendy cofania do schowka.",
       "revert": "Bezpiecznie cofnij ostatni commit (tworzy nowy commit, nie nadpisuje historii).",
+      "revertFromOrigin": "Cofnij ostatni commit i wypchnij tę zmianę na origin — np. po niechcianym wdrożeniu. Jeśli branch ma podłączony webhook (CI/CD), zadziała on normalnie, jak po każdym push, więc wdrożenie wróci do poprzedniej wersji. To NIE jest force-push ani reset — historia nie jest nadpisywana.",
       "guide": "Otwórz dokumentację Git o cofaniu zmian."
     },
     "deploy": {
@@ -207,6 +232,7 @@
       "copyRollback": "Kopiuj komendy rollback",
       "rollbackCopied": "Komendy rollback skopiowane",
       "revertLast": "Cofnij ostatni commit",
+      "revertFromOrigin": "Cofnij z origin",
       "guide": "Przewodnik Git",
       "note": "Komendy rollback są tylko kopiowane — destrukcyjne operacje nie są uruchamiane automatycznie."
     }
@@ -348,6 +374,14 @@
     "high": "Wysoki",
     "urgent": "Pilny"
   },
+  "taskType": {
+    "feature": "Feature (nowa funkcja)",
+    "bugfix": "Bugfix (poprawka błędu)",
+    "hotfix": "Hotfix (pilna poprawka)",
+    "chore": "Chore (utrzymanie)",
+    "refactor": "Refactor",
+    "docs": "Docs (dokumentacja)"
+  },
   "git": {
     "noRepo": "Otwórz repozytorium Git, aby korzystać z funkcji Git w BranchBoard.",
     "noUser": "Nie wykryto użytkownika Git. Skonfiguruj git config user.name oraz user.email.",
@@ -385,12 +419,18 @@
     "createBoard": "Utwórz tablicę",
     "detectedUser": "Wykryty użytkownik Git"
   },
+  "notifications": {
+    "title": "Powiadomienia",
+    "markAllRead": "Oznacz wszystkie jako przeczytane",
+    "empty": "Brak powiadomień"
+  },
   "settings": {
     "title": "Ustawienia",
     "general": "Ogólne",
     "git": "Git",
     "users": "Użytkownicy",
     "appearance": "Wygląd",
+    "notifications": "Powiadomienia",
     "sync": "Synchronizacja",
     "ai": "Prompt AI",
     "boardTitle": "Tytuł tablicy",
@@ -418,6 +458,23 @@
     "showAvatars": "Pokaż awatary",
     "showPriority": "Pokaż priorytet",
     "reduceAnimations": "Ogranicz animacje",
+    "notifEnabled": "Włącz powiadomienia",
+    "notifShowToast": "Pokazuj jako toast VS Code",
+    "notifTypesSection": "Typy powiadomień",
+    "notifTaskCreated": "Utworzono nowe zadanie",
+    "notifCommentAdded": "Dodano nowy komentarz",
+    "notifAssigned": "Przypisano do Ciebie",
+    "notifBranchPushed": "Wypchnięto branch",
+    "notifMergeFinished": "Zakończono merge",
+    "notifMergeFailed": "Merge nie powiódł się",
+    "notifTaskMovedToReview": "Zadanie przeniesiono do review",
+    "notifTaskDone": "Zadanie oznaczone jako zrobione",
+    "notifSoundSection": "Dźwięk powiadomień",
+    "notifSoundEnabled": "Odtwarzaj dźwięk przy powiadomieniu",
+    "notifSoundPreview": "Odsłuchaj",
+    "notifSoundMailAlert": "Alert e-mail",
+    "notifSoundBells": "Dzwonki",
+    "notifSoundDoubleBeep": "Podwójny sygnał",
     "syncInterval": "Interwał synchronizacji (s)",
     "syncNow": "Synchronizuj teraz",
     "sshSection": "Połączenie SSH / serwer",
@@ -439,6 +496,14 @@
     "connNotServer": "Najpierw ustaw tryb przechowywania na „Serwer”.",
     "showLogs": "Pokaż logi",
     "currentUser": "Bieżący użytkownik Git",
+    "myProfile": "Mój profil",
+    "uploadPhoto": "Wybierz zdjęcie",
+    "removePhoto": "Usuń zdjęcie",
+    "profilePhotoInvalid": "Wybierz plik graficzny.",
+    "profilePhotoTooLarge": "Zdjęcie jest zbyt duże (maks. 350 KB).",
+    "initials": "Inicjały",
+    "avatarColor": "Kolor awatara",
+    "customColor": "Własny kolor",
     "importedUsers": "Zaimportowani użytkownicy",
     "addUser": "Dodaj użytkownika",
     "deleteUser": "Usuń użytkownika",
@@ -459,11 +524,49 @@
   },
   "nav": {
     "board": "Tablica",
+    "today": "Zadania na dziś",
     "currentBranch": "Aktualny branch",
     "commandCenter": "Centrum",
     "branchMap": "Mapa branchy",
     "settings": "Ustawienia",
     "view": "Widok"
+  },
+  "today": {
+    "title": "Zadania na dziś",
+    "subtitle": "Twoja lista pracy na dziś — zaległe, dzisiejsze i nadchodzące zadania w jednym miejscu.",
+    "scope": {
+      "mine": "Moje zadania",
+      "all": "Wszystkie zadania"
+    },
+    "range": {
+      "today": "Dziś",
+      "next3": "Najbliższe 3 dni",
+      "week": "Ten tydzień",
+      "custom": "Wybrany okres",
+      "from": "Od",
+      "to": "Do",
+      "apply": "Zastosuj"
+    },
+    "section": {
+      "overdue": "Zaległe",
+      "today": "Dziś",
+      "tomorrow": "Jutro",
+      "upcoming": "Nadchodzące",
+      "custom": "Wybrany okres",
+      "noDate": "Bez terminu",
+      "noDateHint": "Otwarte zadania bez ustawionego terminu, posortowane według priorytetu."
+    },
+    "empty": {
+      "title": "Brak zadań na ten zakres",
+      "hint": "Świetnie! Nie masz tu nic zaległego ani zaplanowanego na wybrany okres.",
+      "noDate": "Brak zadań bez terminu"
+    },
+    "count": {
+      "tasks": "{count} zadań",
+      "overdue": "{count} zaległych"
+    },
+    "setDueDate": "Ustaw termin",
+    "column": "Kolumna"
   },
   "branchMap": {
     "title": "Mapa branchy",
@@ -516,6 +619,12 @@
   "currentBranch": {
     "title": "Aktualny branch",
     "subtitle": "Wszystko, co BranchBoard wie o bieżącej pracy i powiązanym zadaniu.",
+    "branchLabel": "Branch roboczy",
+    "branchHealth": "Bezpieczeństwo brancha",
+    "taskLinked": "Powiązane zadanie",
+    "currentStatus": "Aktualny status",
+    "updatedShort": "Aktualizacja",
+    "checklistAndDiscussion": "Lista zadań i dyskusja",
     "noTaskTitle": "Ten branch nie ma jeszcze zadania w BranchBoard.",
     "noTaskDescription": "Możesz utworzyć zadanie z aktualnego brancha albo przypiąć branch do istniejącego zadania.",
     "createTaskFromBranch": "Utwórz zadanie z brancha",
@@ -553,6 +662,23 @@
     "ahead": "przed main",
     "behind": "za main",
     "loading": "Wczytywanie aktualnego brancha…",
+    "safety": {
+      "workingTree": "Drzewo robocze",
+      "cleanTree": "Czyste",
+      "dirtyTree": "Lokalne zmiany",
+      "remote": "Origin",
+      "remoteSynced": "Wypchnięty",
+      "remoteMissing": "Nie wypchnięty",
+      "mergePolicy": "Merge do main",
+      "mergeDisabled": "Wyłączony",
+      "mergeAllowed": "Po potwierdzeniu",
+      "cleanBeforeFinish": "Czyste drzewo przed finish",
+      "preFinishCommand": "Komenda przed finish",
+      "configured": "Ustawiona",
+      "notConfigured": "Brak",
+      "required": "Wymagane",
+      "notRequired": "Niewymagane"
+    },
     "step": {
       "noTask": "Najpierw utwórz zadanie z tego brancha albo przypnij istniejące.",
       "dirty": "Masz lokalne zmiany. Zacommituj je albo użyj stash przed zakończeniem zadania.",
@@ -566,6 +692,7 @@
   },
   "tooltips": {
     "nav": {
+      "today": "Codzienna lista pracy: zaległe, dzisiejsze i nadchodzące zadania z możliwością wyboru zakresu dat.",
       "board": "Tablica Kanban — Twoje zadania, kolumny i akcje Git.",
       "currentBranch": "Wszystko o branchu, na którym teraz jesteś, i jego zadaniu.",
       "commandCenter": "Widok dla lidera: zespół, branche, ryzyka, aktywność i wdrożenia.",
@@ -637,7 +764,9 @@
       "deleteLocalBranchAfterMerge": "Usuwa lokalny branch po udanym merge do main.",
       "finishOnMoveToDone": "Gdy przeniesiesz zadanie z branchem do kolumny DONE, uruchamia bezpieczny finish (push + opcjonalny backup i merge do main z potwierdzeniem, zależnie od polityki Git). Domyślnie wyłączone.",
       "language": "Język interfejsu BranchBoard (polski / angielski).",
-      "storageMode": "Lokalny JSON w projekcie albo wspólna baza SQLite po SSH dla zespołu."
+      "storageMode": "Lokalny JSON w projekcie albo wspólna baza SQLite po SSH dla zespołu.",
+      "notifShowToast": "Pokazuje też natywny toast VS Code, oprócz listy w dzwonku powiadomień.",
+      "initials": "Widoczne na Twoim awatarze, gdy nie masz zdjęcia profilowego. Maks. 2 znaki."
     }
   },
   "cc": {

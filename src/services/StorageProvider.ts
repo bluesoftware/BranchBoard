@@ -64,6 +64,7 @@ export function createDefaultBoard(
     tasks: [],
     events: [],
     deployments: [],
+    notifications: [],
   };
 }
 
@@ -137,10 +138,13 @@ export const GIT_FLOW_COLUMNS_EN: BoardData["columns"] = GIT_FLOW_COLUMNS_PL.map
 }));
 
 /** Current on-disk board schema version. Bumped when the shape changes. */
-export const BOARD_SCHEMA_VERSION = 3;
+export const BOARD_SCHEMA_VERSION = 4;
 
 /** Hard cap on stored events so board.json never grows unbounded. */
 export const MAX_STORED_EVENTS = 300;
+
+/** Hard cap on stored notifications so board.json never grows unbounded. */
+export const MAX_STORED_NOTIFICATIONS = 200;
 
 /** Standard column set used by the onboarding "Create board" flow (Git-mapped). */
 export const ONBOARDING_COLUMNS: BoardData["columns"] = GIT_FLOW_COLUMNS_EN.map((c) => ({ ...c }));

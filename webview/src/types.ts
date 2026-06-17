@@ -4,6 +4,10 @@ export type TaskStatus = "open" | "in-progress" | "done";
 
 export type TaskPriority = "none" | "low" | "medium" | "high" | "urgent";
 
+export type TaskType = "feature" | "bugfix" | "hotfix" | "chore" | "refactor" | "docs";
+
+export const TASK_TYPES: TaskType[] = ["feature", "bugfix", "hotfix", "chore", "refactor", "docs"];
+
 export type GitStage = "none" | "feature" | "review" | "staging" | "production";
 
 export interface ColumnHook {
@@ -39,6 +43,8 @@ export interface BoardUser {
   email: string;
   avatarText: string;
   color: string;
+  /** Optional profile photo, stored as a data URL (e.g. "data:image/png;base64,..."). */
+  avatarPhoto?: string;
 }
 
 export interface TaskComment {
@@ -63,6 +69,7 @@ export interface BoardTask {
   assignedUserId: string | null;
   branchName: string;
   priority: TaskPriority;
+  taskType?: TaskType;
   comments: TaskComment[];
   checklist: ChecklistItem[];
   createdAt: string;
@@ -111,6 +118,29 @@ export interface BoardEvent {
   payload?: Record<string, unknown>;
 }
 
+export type NotificationType =
+  | "task_created"
+  | "comment_added"
+  | "assigned_to_you"
+  | "branch_pushed"
+  | "merge_finished"
+  | "merge_failed"
+  | "task_moved_to_review"
+  | "task_done";
+
+export interface BoardNotificationRecord {
+  id: string;
+  type: NotificationType;
+  taskId: string | null;
+  branchName: string | null;
+  actorUserId: string | null;
+  recipientUserIds: string[];
+  readBy: string[];
+  title: string;
+  message: string;
+  createdAt: string;
+}
+
 export type DeploymentEnvironment = "dev" | "staging" | "production";
 export type DeploymentStatus = "not_deployed" | "deploying" | "deployed" | "failed";
 
@@ -137,6 +167,7 @@ export interface BoardData {
   tasks: BoardTask[];
   events: BoardEvent[];
   deployments: Deployment[];
+  notifications: BoardNotificationRecord[];
   updatedAt?: string;
 }
 
@@ -366,6 +397,27 @@ export interface AppearanceConfig {
   reduceAnimations: boolean;
 }
 
+export interface NotificationSettings {
+  enabled: boolean;
+  showToast: boolean;
+  notifyTaskCreated: boolean;
+  notifyCommentAdded: boolean;
+  notifyAssigned: boolean;
+  notifyBranchPushed: boolean;
+  notifyMergeFinished: boolean;
+  notifyMergeFailed: boolean;
+  notifyTaskMovedToReview: boolean;
+  notifyTaskDone: boolean;
+  /** Play a sound alongside the bell/toast when a notification arrives. */
+  soundEnabled: boolean;
+  /** id of the selected sound, matches a key in NOTIFICATION_SOUND_IDS / soundFiles. */
+  soundId: string;
+}
+
+/** Built-in notification sound files, bundled locally (no CDN). */
+export const NOTIFICATION_SOUND_IDS = ["mail-alert", "bells", "double-beep"] as const;
+export type NotificationSoundId = (typeof NOTIFICATION_SOUND_IDS)[number];
+
 export interface ConnectionStep {
   name: string;
   ok: boolean;
@@ -395,6 +447,9 @@ export interface AppConfig {
     sqliteRemotePath: string;
   };
   appearance: AppearanceConfig;
+  notifications: NotificationSettings;
+  /** webview-resolved URIs for the bundled notification sounds, keyed by id. */
+  soundFiles: Record<string, string>;
   policy: {
     allowDirectMergeToMain: boolean;
     requireConfirmationBeforeMerge: boolean;
@@ -423,6 +478,12 @@ export interface AppConfig {
     hookTimeoutSeconds: number;
     useDevBranch: boolean;
     defaultBranchPrefix: string;
+    /** Dev/integration branch (managed by the staging column), mirrors the host setting. */
+    devBranch: string;
+    /** Whether moving a task between columns triggers the column's Git automation. */
+    runGitActionsOnMove: boolean;
+    /** Whether move-driven Git actions ask for confirmation before running. */
+    confirmGitActionsOnMove: boolean;
   };
 }
 

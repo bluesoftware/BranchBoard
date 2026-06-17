@@ -16,11 +16,25 @@ export function slugify(input: string): string {
     .replace(/-+$/g, "");
 }
 
-/** Suggested branch name for a task: feature/task-<id>-<slug>. */
+/** Git-safe slug using underscores instead of dashes ("Nowe zadanie" -> "nowe_zadanie"). */
+export function slugifyUnderscore(input: string): string {
+  return (input || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/ł/g, "l")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40)
+    .replace(/_+$/g, "");
+}
+
+/** Suggested branch name for a task: {type}/{title_}-task-{id}, e.g. feature/nowe_zadanie-task-whrpfi. */
 export function suggestBranchName(task: BoardTask): string {
-  const shortId = task.id.replace(/[^a-z0-9]/gi, "").slice(-6) || "task";
-  const slug = slugify(task.title) || "task";
-  return `feature/task-${shortId}-${slug}`;
+  const type = task.taskType || "feature";
+  const shortId = (task.id.replace(/[^a-z0-9]/gi, "").slice(-6) || "task").toLowerCase();
+  const slug = slugifyUnderscore(task.title) || "task";
+  return `${type}/${slug}-task-${shortId}`;
 }
 
 /** Two-letter initials from a name or email. */

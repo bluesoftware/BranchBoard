@@ -106,6 +106,14 @@ export function CalendarIcon({ size = 12, style }: IconProps) {
   );
 }
 
+export function BellIcon({ size = 14, style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" style={style} aria-hidden="true">
+      <path d="M8 1.25a.75.75 0 01.75.75v.56A4.5 4.5 0 0112.5 7v2.94l1.27 1.9a.75.75 0 01-.62 1.16H2.85a.75.75 0 01-.62-1.16L3.5 9.94V7a4.5 4.5 0 013.75-4.44V2A.75.75 0 018 1.25zM6.2 13.5a1.8 1.8 0 003.6 0H6.2z" />
+    </svg>
+  );
+}
+
 export function LogoMark({ size = 18, style }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"

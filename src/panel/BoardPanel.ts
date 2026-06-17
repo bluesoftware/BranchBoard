@@ -8,6 +8,8 @@ import {
   BranchBoardConfig,
   GitInfo,
   InboundMessage,
+  NOTIFICATION_SOUND_IDS,
+  NotificationType,
   OutboundMessage,
 } from "../types";
 import { BoardService } from "../services/BoardService";
@@ -78,6 +80,9 @@ export class WebviewController {
   private dashboardRequested = false;
   /** Page to navigate to once the webview signals "ready". */
   private pendingPage: CommandCenterPage | undefined;
+  /** The board user id resolved for THIS extension/window instance — used to
+   *  decide whether a native toast for a notification should appear here. */
+  private currentUserId: string | null = null;
 
   constructor(
     private readonly webview: vscode.Webview,
@@ -131,6 +136,16 @@ export class WebviewController {
     this.post({ type: "boardData", payload: board });
   }
 
+  /** Resolve the bundled notification sound files into webview-loadable URIs. */
+  private getSoundFileUris(): Record<string, string> {
+    const distRoot = vscode.Uri.joinPath(this.deps.context.extensionUri, "webview", "dist");
+    const files: Record<string, string> = {};
+    for (const id of NOTIFICATION_SOUND_IDS) {
+      files[id] = this.webview.asWebviewUri(vscode.Uri.joinPath(distRoot, "sounds", `${id}.mp3`)).toString();
+    }
+    return files;
+  }
+
   private postAppConfig() {
     const c = this.deps.getConfig();
     const payload: AppConfig = {
@@ -147,6 +162,8 @@ export class WebviewController {
         sqliteRemotePath: c.sqliteRemotePath,
       },
       appearance: c.appearance,
+      notifications: c.notifications,
+      soundFiles: this.getSoundFileUris(),
       policy: {
         allowDirectMergeToMain: c.allowDirectMergeToMain,
         requireConfirmationBeforeMerge: c.requireConfirmationBeforeMerge,
@@ -175,6 +192,9 @@ export class WebviewController {
         hookTimeoutSeconds: c.hookTimeoutSeconds,
         useDevBranch: c.useDevBranch,
         defaultBranchPrefix: c.defaultBranchPrefix,
+        devBranch: c.devBranch,
+        runGitActionsOnMove: c.runGitActionsOnMove,
+        confirmGitActionsOnMove: c.confirmGitActionsOnMove,
       },
     };
     this.post({ type: "appConfig", payload });
@@ -184,6 +204,7 @@ export class WebviewController {
     const info = await this.deps.git.getInfo();
     const board = this.deps.board.getBoard();
     const currentUserId = resolveCurrentUserId(board, info, this.deps.getConfig());
+    this.currentUserId = currentUserId;
     this.deps.board.setNotificationContext(currentUserId ?? "");
     this.post({ type: "gitInfo", payload: { git: info, currentUserId } });
   }
@@ -319,20 +340,26 @@ export class WebviewController {
     return this.runHookChain(toCol?.onEnter, toColumnId, taskId);
   }
 
-  /** Generate a safe feature branch name from a task + its column prefix. */
-  private branchNameFor(taskId: string, columnId: string): string {
-    const { board, getConfig } = this.deps;
-    const cfg = getConfig();
-    const task = board.getBoard().tasks.find((t) => t.id === taskId);
-    const col = board.getColumn(columnId);
-    const prefix = (col?.branchPrefix || cfg.defaultBranchPrefix || "feature/").trim();
-    const idPart = (task?.id.split("_").pop() || task?.id || "task").slice(0, 8);
-    const slug = (task?.title ?? "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 32);
-    return `${prefix}${idPart}${slug ? `-${slug}` : ""}`.replace(/-+$/g, "");
+  /**
+   * Generate a safe branch name: {type}/{title_}-task-{id}
+   * e.g. feature/nowe_zadanie-task-whrpfi. The type comes from the task's
+   * taskType (feature/bugfix/…); title is lowercased with spaces -> underscores.
+   */
+  private branchNameFor(taskId: string): string {
+    const task = this.deps.board.getBoard().tasks.find((t) => t.id === taskId);
+    const type = (task?.taskType || "feature").trim();
+    const shortId = (task?.id.replace(/[^a-z0-9]/gi, "").slice(-6) || "task").toLowerCase();
+    const titleSlug =
+      (task?.title ?? "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/ł/g, "l")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 40)
+        .replace(/_+$/g, "") || "task";
+    return `${type}/${titleSlug}-task-${shortId}`;
   }
 
   /** Modal confirm, or auto-yes when confirmGitActionsOnMove is off. */
@@ -364,9 +391,30 @@ export class WebviewController {
       if (result.markDone) {
         await board.updateTask(task.id, { status: "done", finishedAt: new Date().toISOString() });
         await board.logEvent("merge_finished", { taskId: task.id, branchName: task.branchName });
+        await this.notify("merge_finished", {
+          title: t("notifMergeFinishedTitle"),
+          message: t("notifMergeFinishedBody").replace("{title}", task.title),
+          taskId: task.id,
+          branchName: task.branchName,
+          recipientUserIds: this.actionOutcomeRecipients(task),
+        });
+        await this.notify("task_done", {
+          title: t("notifTaskDoneTitle"),
+          message: t("notifTaskDoneBody").replace("{title}", task.title),
+          taskId: task.id,
+          branchName: task.branchName,
+          recipientUserIds: this.actionOutcomeRecipients(task),
+        });
       }
     } else if (!result.ok) {
       await board.logEvent("merge_failed", { taskId: task.id, branchName: task.branchName });
+      await this.notify("merge_failed", {
+        title: t("notifMergeFailedTitle"),
+        message: t("notifMergeFailedBody").replace("{title}", task.title),
+        taskId: task.id,
+        branchName: task.branchName,
+        recipientUserIds: this.actionOutcomeRecipients(task),
+      });
     }
     this.reply(msg, result);
     this.toast(result);
@@ -399,7 +447,7 @@ export class WebviewController {
 
     if (stage === "feature") {
       if (!task.branchName) {
-        const name = this.branchNameFor(taskId, toColumnId);
+        const name = this.branchNameFor(taskId);
         const res = await git.createBranch(name);
         if (res.ok) {
           await board.updateTask(taskId, { branchName: name });
@@ -408,7 +456,9 @@ export class WebviewController {
         this.reply(msg, res);
         this.toast(res);
       } else {
-        const res = await git.checkoutBranch(task.branchName);
+        // Branch is recorded on the card but may not exist locally yet — create
+        // it (from origin or current HEAD) instead of failing.
+        const res = await git.ensureBranch(task.branchName);
         if (res.ok) {
           await board.logEvent("branch_checked_out", { taskId, branchName: task.branchName });
         }
@@ -424,9 +474,22 @@ export class WebviewController {
         this.toast({ ok: false, message: "Task has no branch — nothing to push." });
         return;
       }
+      const ensured = await git.ensureBranch(task.branchName);
+      if (!ensured.ok) {
+        this.reply(msg, ensured);
+        this.toast(ensured);
+        return;
+      }
       const res = await git.pushBranch(task.branchName);
       if (res.ok) {
         await board.logEvent("branch_pushed", { taskId, branchName: task.branchName });
+        await this.notify("branch_pushed", {
+          title: t("notifBranchPushedTitle"),
+          message: t("notifBranchPushedBody").replace("{branch}", task.branchName),
+          taskId,
+          branchName: task.branchName,
+          recipientUserIds: this.actionOutcomeRecipients(task),
+        });
       }
       this.reply(msg, res);
       this.toast(res);
@@ -437,6 +500,12 @@ export class WebviewController {
     if (stage === "staging") {
       if (!task.branchName) {
         this.toast({ ok: false, message: "Task has no branch — nothing to merge." });
+        return;
+      }
+      const ensured = await git.ensureBranch(task.branchName);
+      if (!ensured.ok) {
+        this.reply(msg, ensured);
+        this.toast(ensured);
         return;
       }
       const target =
@@ -984,6 +1053,62 @@ export class WebviewController {
           break;
         }
 
+        case "revertFromOrigin": {
+          const branch = String(msg.payload?.branchName ?? "").trim();
+          const confirmed =
+            (await vscode.window.showWarningMessage(
+              `Revert the last commit on '${branch || "the current branch"}' and push the rollback to origin?`,
+              {
+                modal: true,
+                detail:
+                  "This creates a new commit that undoes the last one, then pushes it to origin. " +
+                  "It does not rewrite history and does not force-push. If a deploy webhook is connected to this branch, " +
+                  "it will fire normally for the rollback commit, the same as for any other push.",
+              },
+              "Yes"
+            )) === "Yes";
+          if (!confirmed) {
+            break;
+          }
+          if (branch) {
+            const cur = await git.getCurrentBranch();
+            if (cur !== branch) {
+              const co = await git.checkoutBranch(branch);
+              if (!co.ok) {
+                this.reply(msg, co);
+                this.toast(co);
+                break;
+              }
+            }
+          }
+          if (await git.hasUncommittedChanges()) {
+            const r = {
+              ok: false,
+              action: "revertFromOrigin",
+              message: "You have uncommitted changes. Commit or stash them before reverting.",
+            };
+            this.reply(msg, r);
+            this.toast(r);
+            break;
+          }
+          const targetBranch = branch || (await git.getCurrentBranch()) || "";
+          if (!targetBranch) {
+            const r = {
+              ok: false,
+              action: "revertFromOrigin",
+              message: "Could not determine which branch to push (detached HEAD?). Checkout a branch first.",
+            };
+            this.reply(msg, r);
+            this.toast(r);
+            break;
+          }
+          const rfo = await git.revertFromOrigin(targetBranch);
+          this.reply(msg, rfo);
+          this.toast(rfo);
+          await this.postGitInfo();
+          break;
+        }
+
         case "logEvent":
           await board.logEvent(msg.payload?.type, {
             taskId: msg.payload?.taskId ?? null,
@@ -991,6 +1116,24 @@ export class WebviewController {
             payload: msg.payload?.payload ?? {},
           });
           break;
+
+        case "markNotificationRead": {
+          const info = await git.getInfo();
+          const currentUserId = resolveCurrentUserId(board.getBoard(), info, getConfig());
+          if (currentUserId && msg.payload?.notificationId) {
+            await board.markNotificationRead(msg.payload.notificationId, currentUserId);
+          }
+          break;
+        }
+
+        case "markAllNotificationsRead": {
+          const info = await git.getInfo();
+          const currentUserId = resolveCurrentUserId(board.getBoard(), info, getConfig());
+          if (currentUserId) {
+            await board.markAllNotificationsRead(currentUserId);
+          }
+          break;
+        }
 
         case "refresh":
           this.postAppConfig();
@@ -1008,9 +1151,15 @@ export class WebviewController {
           await this.postGitInfo();
           break;
 
-        case "createTask":
-          await board.createTask(msg.payload);
+        case "createTask": {
+          const created = await board.createTask(msg.payload);
+          await this.notify("task_created", {
+            title: t("notifTaskCreatedTitle"),
+            message: t("notifTaskCreatedBody").replace("{title}", created.title),
+            taskId: created.id,
+          });
           break;
+        }
 
         case "updateTask":
           await board.updateTask(msg.payload.id, msg.payload.patch);
@@ -1055,6 +1204,17 @@ export class WebviewController {
           }
 
           await board.moveTask(taskId, toColumnId, toIndex);
+
+          if (changingColumn && toColumnId === board.findReviewColumnId()) {
+            const movedToReview = board.getBoard().tasks.find((t) => t.id === taskId);
+            if (movedToReview) {
+              await this.notify("task_moved_to_review", {
+                title: t("notifTaskMovedToReviewTitle"),
+                message: t("notifTaskMovedToReviewBody").replace("{title}", movedToReview.title),
+                taskId,
+              });
+            }
+          }
 
           // Column command hooks: onLeave (from) then onEnter (to). A blocking
           // failure reverts the move so the board stays consistent.
@@ -1129,13 +1289,33 @@ export class WebviewController {
           break;
         }
 
-        case "addComment":
+        case "addComment": {
           await board.addComment(msg.payload.taskId, msg.payload.authorId, msg.payload.text);
+          const commentedTask = board.getBoard().tasks.find((tt) => tt.id === msg.payload.taskId);
+          if (commentedTask) {
+            await this.notify("comment_added", {
+              title: t("notifCommentAddedTitle"),
+              message: t("notifCommentAddedBody").replace("{title}", commentedTask.title),
+              taskId: commentedTask.id,
+              actorUserId: msg.payload.authorId,
+            });
+          }
           break;
+        }
 
-        case "assignUser":
+        case "assignUser": {
           await board.updateTask(msg.payload.taskId, { assignedUserId: msg.payload.userId });
+          const assignedTask = board.getBoard().tasks.find((tt) => tt.id === msg.payload.taskId);
+          if (assignedTask && msg.payload.userId) {
+            await this.notify("assigned_to_you", {
+              title: t("notifAssignedTitle"),
+              message: t("notifAssignedBody").replace("{title}", assignedTask.title),
+              taskId: assignedTask.id,
+              recipientUserIds: [msg.payload.userId],
+            });
+          }
           break;
+        }
 
         case "changeUser":
           await vscode.workspace
@@ -1162,7 +1342,10 @@ export class WebviewController {
         }
 
         case "checkoutBranch": {
-          const res = await git.checkoutBranch(msg.payload.branchName);
+          // ensureBranch (not checkoutBranch): the branch may only exist on
+          // origin (pushed by a teammate) — this creates a local tracking
+          // branch and checks it out instead of failing.
+          const res = await git.ensureBranch(msg.payload.branchName);
           if (res.ok) {
             await board.logEvent("branch_checked_out", { branchName: msg.payload.branchName });
           }
@@ -1176,6 +1359,12 @@ export class WebviewController {
           const res = await git.pushBranch(msg.payload.branchName);
           if (res.ok) {
             await board.logEvent("branch_pushed", { branchName: msg.payload.branchName });
+            await this.notify("branch_pushed", {
+              title: t("notifBranchPushedTitle"),
+              message: t("notifBranchPushedBody").replace("{branch}", msg.payload.branchName),
+              branchName: msg.payload.branchName,
+              recipientUserIds: this.actionOutcomeRecipients(),
+            });
           }
           this.reply(msg, res);
           this.toast(res);
@@ -1202,8 +1391,29 @@ export class WebviewController {
           }
           if (result.markDone) {
             await board.logEvent("merge_finished", { taskId: task.id, branchName: task.branchName || null });
+            await this.notify("merge_finished", {
+              title: t("notifMergeFinishedTitle"),
+              message: t("notifMergeFinishedBody").replace("{title}", task.title),
+              taskId: task.id,
+              branchName: task.branchName || null,
+              recipientUserIds: this.actionOutcomeRecipients(task),
+            });
+            await this.notify("task_done", {
+              title: t("notifTaskDoneTitle"),
+              message: t("notifTaskDoneBody").replace("{title}", task.title),
+              taskId: task.id,
+              branchName: task.branchName || null,
+              recipientUserIds: this.actionOutcomeRecipients(task),
+            });
           } else if (!result.ok && /merge|conflict/i.test(`${result.message} ${result.detail ?? ""}`)) {
             await board.logEvent("merge_failed", { taskId: task.id, branchName: task.branchName || null });
+            await this.notify("merge_failed", {
+              title: t("notifMergeFailedTitle"),
+              message: t("notifMergeFailedBody").replace("{title}", task.title),
+              taskId: task.id,
+              branchName: task.branchName || null,
+              recipientUserIds: this.actionOutcomeRecipients(task),
+            });
           }
           this.reply(msg, result);
           this.toast(result);
@@ -1234,8 +1444,29 @@ export class WebviewController {
           }
           if (result.markDone) {
             await board.logEvent("merge_finished", { taskId: task.id, branchName: task.branchName || null });
+            await this.notify("merge_finished", {
+              title: t("notifMergeFinishedTitle"),
+              message: t("notifMergeFinishedBody").replace("{title}", task.title),
+              taskId: task.id,
+              branchName: task.branchName || null,
+              recipientUserIds: this.actionOutcomeRecipients(task),
+            });
+            await this.notify("task_done", {
+              title: t("notifTaskDoneTitle"),
+              message: t("notifTaskDoneBody").replace("{title}", task.title),
+              taskId: task.id,
+              branchName: task.branchName || null,
+              recipientUserIds: this.actionOutcomeRecipients(task),
+            });
           } else if (!result.ok) {
             await board.logEvent("merge_failed", { taskId: task.id, branchName: task.branchName || null });
+            await this.notify("merge_failed", {
+              title: t("notifMergeFailedTitle"),
+              message: t("notifMergeFailedBody").replace("{title}", task.title),
+              taskId: task.id,
+              branchName: task.branchName || null,
+              recipientUserIds: this.actionOutcomeRecipients(task),
+            });
           }
           this.reply(msg, result);
           this.toast(result);
@@ -1273,6 +1504,22 @@ export class WebviewController {
           if (name) {
             await board.addUserManually(name, String(msg.payload?.email ?? ""));
           }
+          break;
+        }
+
+        case "updateUser": {
+          const userId = String(msg.payload?.userId ?? "");
+          if (!userId) {
+            break;
+          }
+          const patch = (msg.payload?.patch ?? {}) as Record<string, unknown>;
+          const allowed: Record<string, unknown> = {};
+          for (const key of ["name", "email", "avatarText", "color", "avatarPhoto"] as const) {
+            if (key in patch) {
+              allowed[key] = patch[key];
+            }
+          }
+          await board.updateUser(userId, allowed);
           break;
         }
 
@@ -1351,6 +1598,65 @@ export class WebviewController {
     }
   }
 
+  /**
+   * Recipients for "outcome of an action" events (branch pushed, merge
+   * finished/failed, task done). The person who triggered the action is
+   * always included — they're the one waiting to know it actually
+   * succeeded — plus the task's assignee if that's someone else.
+   */
+  private actionOutcomeRecipients(task?: { assignedUserId?: string | null } | null): string[] {
+    return Array.from(
+      new Set([this.currentUserId, task?.assignedUserId].filter((id): id is string => !!id))
+    );
+  }
+
+  /**
+   * Create a persisted, per-user notification — gated by the master switch and
+   * the per-type setting in branchBoard.notifications.*. Optionally mirrors it
+   * as a native VS Code toast when `showToast` is enabled.
+   */
+  private async notify(
+    type: NotificationType,
+    fields: {
+      title: string;
+      message: string;
+      taskId?: string | null;
+      branchName?: string | null;
+      actorUserId?: string | null;
+      recipientUserIds?: string[];
+    }
+  ): Promise<void> {
+    const cfg = this.deps.getConfig().notifications;
+    if (!cfg?.enabled) {
+      return;
+    }
+    const flagByType: Record<NotificationType, boolean> = {
+      task_created: cfg.notifyTaskCreated,
+      comment_added: cfg.notifyCommentAdded,
+      assigned_to_you: cfg.notifyAssigned,
+      branch_pushed: cfg.notifyBranchPushed,
+      merge_finished: cfg.notifyMergeFinished,
+      merge_failed: cfg.notifyMergeFailed,
+      task_moved_to_review: cfg.notifyTaskMovedToReview,
+      task_done: cfg.notifyTaskDone,
+    };
+    if (!flagByType[type]) {
+      return;
+    }
+    const record = await this.deps.board.addNotification(type, fields);
+    if (!record || !cfg.showToast) {
+      return;
+    }
+    // This extension/window instance only shows the native toast if ITS user
+    // is actually one of the recipients — e.g. when PA assigns a task to DW,
+    // PA's own window must stay quiet and only DW's window (once the change
+    // syncs to DW's machine and is picked up as an "external" notification,
+    // or immediately here if DW is the one performing the action) shows it.
+    if (this.currentUserId && record.recipientUserIds.includes(this.currentUserId)) {
+      vscode.window.showInformationMessage(`BranchBoard: ${fields.message}`);
+    }
+  }
+
   /** Build the webview HTML, pointing at the built Vite bundle. */
   private getHtml(): string {
     const distRoot = vscode.Uri.joinPath(this.deps.context.extensionUri, "webview", "dist");
@@ -1363,6 +1669,7 @@ export class WebviewController {
       `style-src ${this.webview.cspSource} 'unsafe-inline'`,
       `script-src 'nonce-${nonce}'`,
       `font-src ${this.webview.cspSource}`,
+      `media-src ${this.webview.cspSource}`,
     ].join("; ");
 
     return /* html */ `<!DOCTYPE html>

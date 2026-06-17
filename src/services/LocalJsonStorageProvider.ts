@@ -127,6 +127,12 @@ export class LocalJsonStorageProvider implements StorageProvider {
       ...d,
       tested: d.tested ?? false,
     }));
+    // v4: persisted per-user notifications. Older boards start with no history.
+    board.notifications = (Array.isArray(board.notifications) ? board.notifications : []).map((n) => ({
+      ...n,
+      recipientUserIds: Array.isArray(n.recipientUserIds) ? n.recipientUserIds : [],
+      readBy: Array.isArray(n.readBy) ? n.readBy : [],
+    }));
     board.tasks = (board.tasks ?? []).map((t) => ({
       ...t,
       comments: t.comments ?? [],

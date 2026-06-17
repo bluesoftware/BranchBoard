@@ -16,6 +16,9 @@
     "filter": "Filter",
     "you": "you",
     "searchPlaceholder": "Search tasks, branches, comments…",
+    "inactive": "Inactive",
+    "showInactive": "Show inactive tasks",
+    "hideInactive": "Hide inactive tasks",
     "addColumn": "Column",
     "columnName": "Column name",
     "refresh": "Refresh",
@@ -47,7 +50,14 @@
     "feature": "Feature (origin/branch)",
     "review": "Code review (push + PR)",
     "staging": "Staging (origin/dev)",
-    "production": "Production (origin/main)"
+    "production": "Production (origin/main)",
+    "badge": {
+      "none": "No branch",
+      "feature": "Local branch",
+      "review": "Origin branch",
+      "staging": "Origin dev",
+      "production": "Origin main"
+    }
   },
   "columnConfig": {
     "title": "Column configuration",
@@ -71,7 +81,18 @@
     "timeout": "Timeout (s)",
     "notAllowed": "Command is not on the allowlist (branchBoard.allowedCommands).",
     "securityNote": "Commands run without a shell, allowed binaries only. Variables: {{branch}} {{taskId}} {{slug}} {{baseBranch}} {{targetBranch}} {{mainBranch}}. Every run is recorded in .branchboard/audit.log.",
-    "save": "Save"
+    "save": "Save",
+    "automation": {
+      "title": "Built-in Git automation for this column",
+      "customNote": "The commands below (onEnter/onLeave) are extra, custom steps (e.g. lint, tests) — they run alongside the Git automation described above, independently of it.",
+      "disabledWarning": "Automatic Git actions on move are disabled in settings (branchBoard.runGitActionsOnMove). Enable that setting for the description above to actually run.",
+      "feature": "When a task enters this column: if it has no branch yet, a new branch with prefix \"{prefix}\" is created from the current branch; if it already has one, that branch is checked out.",
+      "review": "When a task enters this column: the task's branch is pushed to {remote} so a Pull Request can be opened.",
+      "staging": "When a task enters this column: the task's branch is safely merged (--no-ff) into {branch} and pushed to {remote}.",
+      "productionMerge": "When a task enters this column: the task's branch is pushed, then — after your confirmation — safely merged into {branch} (checkout → pull → merge --no-ff → push) and the task is moved to DONE.",
+      "productionNoMerge": "When a task enters this column: the task's branch is pushed, but merging into {branch} is DISABLED (branchBoard.allowDirectMergeToMain = false) — the task is moved to the test column without merging into main.",
+      "none": "This column has no Git stage assigned — no automation will run."
+    }
   },
   "task": {
     "add": "Add task",
@@ -98,6 +119,8 @@
     "unassigned": "Unassigned",
     "status": "Status",
     "priority": "Priority",
+    "type": "Task type",
+    "typeLockedHint": "Type drives the branch name. A branch already exists, so the type can't be changed.",
     "column": "Column / status",
     "gitBranch": "Git branch",
     "checklist": "Checklist",
@@ -154,6 +177,7 @@
       "details": "Fields that describe the task. They feed the Team view, filters, risk and the overdue calculation.",
       "assignee": "Who owns the task. Used in the Team view and the 'Mine' filter.",
       "priority": "How important the task is — helps order the work.",
+      "type": "Type of work: feature, bugfix, hotfix, chore, refactor or docs. Determines the branch prefix (e.g. feature/…, bugfix/…).",
       "status": "Task state: open, in progress, done.",
       "column": "The board column = a workflow stage (e.g. review, testing). Metrics and risk are derived from it.",
       "dueDate": "Due date. Drives the 'overdue by N days' counter.",
@@ -186,6 +210,7 @@
       "tag": "Create a safety tag at the current main.",
       "copyRollback": "Copy ready-made rollback commands to the clipboard.",
       "revert": "Safely revert the last commit (creates a new commit, no history rewrite).",
+      "revertFromOrigin": "Revert the last commit and push the result to origin — e.g. after an unwanted deploy. If the branch has a connected webhook (CI/CD), it fires normally, just like for any other push, so the deployment rolls back to the previous version. This is NOT a force-push or reset — history is never rewritten.",
       "guide": "Open the Git documentation on undoing changes."
     },
     "deploy": {
@@ -207,6 +232,7 @@
       "copyRollback": "Copy rollback commands",
       "rollbackCopied": "Rollback commands copied",
       "revertLast": "Revert last commit",
+      "revertFromOrigin": "Revert from origin",
       "guide": "Git guide",
       "note": "Rollback commands are only copied — destructive operations are never run automatically."
     }
@@ -348,6 +374,14 @@
     "high": "High",
     "urgent": "Urgent"
   },
+  "taskType": {
+    "feature": "Feature",
+    "bugfix": "Bugfix",
+    "hotfix": "Hotfix",
+    "chore": "Chore",
+    "refactor": "Refactor",
+    "docs": "Docs"
+  },
   "git": {
     "noRepo": "Open a Git repository to use BranchBoard Git features.",
     "noUser": "Git user not detected. Configure git config user.name and user.email.",
@@ -385,12 +419,18 @@
     "createBoard": "Create board",
     "detectedUser": "Detected Git user"
   },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Mark all as read",
+    "empty": "No notifications yet"
+  },
   "settings": {
     "title": "Settings",
     "general": "General",
     "git": "Git",
     "users": "Users",
     "appearance": "Appearance",
+    "notifications": "Notifications",
     "sync": "Sync",
     "ai": "AI Prompt",
     "boardTitle": "Board title",
@@ -418,6 +458,23 @@
     "showAvatars": "Show avatars",
     "showPriority": "Show priority",
     "reduceAnimations": "Reduce animations",
+    "notifEnabled": "Enable notifications",
+    "notifShowToast": "Show as VS Code toast",
+    "notifTypesSection": "Notification types",
+    "notifTaskCreated": "New task created",
+    "notifCommentAdded": "New comment added",
+    "notifAssigned": "Assigned to you",
+    "notifBranchPushed": "Branch pushed",
+    "notifMergeFinished": "Merge finished",
+    "notifMergeFailed": "Merge failed",
+    "notifTaskMovedToReview": "Task moved to review",
+    "notifTaskDone": "Task marked done",
+    "notifSoundSection": "Notification sound",
+    "notifSoundEnabled": "Play a sound on notification",
+    "notifSoundPreview": "Preview",
+    "notifSoundMailAlert": "Mail alert",
+    "notifSoundBells": "Bells",
+    "notifSoundDoubleBeep": "Double beep",
     "syncInterval": "Sync interval (s)",
     "syncNow": "Sync now",
     "sshSection": "SSH / server connection",
@@ -439,6 +496,14 @@
     "connNotServer": "Set storage mode to \"Server\" first.",
     "showLogs": "Show logs",
     "currentUser": "Current Git user",
+    "myProfile": "My profile",
+    "uploadPhoto": "Upload photo",
+    "removePhoto": "Remove photo",
+    "profilePhotoInvalid": "Please choose an image file.",
+    "profilePhotoTooLarge": "Image is too large (max 350 KB).",
+    "initials": "Initials",
+    "avatarColor": "Avatar color",
+    "customColor": "Custom color",
     "importedUsers": "Imported users",
     "addUser": "Add user",
     "deleteUser": "Delete user",
@@ -459,11 +524,49 @@
   },
   "nav": {
     "board": "Board",
+    "today": "Today's Tasks",
     "currentBranch": "Current branch",
     "commandCenter": "Command Center",
     "branchMap": "Branch Map",
     "settings": "Settings",
     "view": "View"
+  },
+  "today": {
+    "title": "Today's Tasks",
+    "subtitle": "Your work list for today — overdue, today's, and upcoming tasks in one place.",
+    "scope": {
+      "mine": "My tasks",
+      "all": "All tasks"
+    },
+    "range": {
+      "today": "Today",
+      "next3": "Next 3 days",
+      "week": "This week",
+      "custom": "Custom range",
+      "from": "From",
+      "to": "To",
+      "apply": "Apply"
+    },
+    "section": {
+      "overdue": "Overdue",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "upcoming": "Upcoming",
+      "custom": "Selected range",
+      "noDate": "No due date",
+      "noDateHint": "Open tasks without a due date, sorted by priority."
+    },
+    "empty": {
+      "title": "No tasks in this range",
+      "hint": "Nice! Nothing overdue or scheduled for this period.",
+      "noDate": "No tasks without a due date"
+    },
+    "count": {
+      "tasks": "{count} tasks",
+      "overdue": "{count} overdue"
+    },
+    "setDueDate": "Set due date",
+    "column": "Column"
   },
   "branchMap": {
     "title": "Branch Map",
@@ -516,6 +619,12 @@
   "currentBranch": {
     "title": "Current branch",
     "subtitle": "Everything BranchBoard knows about the current work and its linked task.",
+    "branchLabel": "Working branch",
+    "branchHealth": "Branch safety",
+    "taskLinked": "Linked task",
+    "currentStatus": "Current status",
+    "updatedShort": "Updated",
+    "checklistAndDiscussion": "Checklist and discussion",
     "noTaskTitle": "This branch is not linked to a BranchBoard task yet.",
     "noTaskDescription": "You can create a task from the current branch or link this branch to an existing task.",
     "createTaskFromBranch": "Create task from branch",
@@ -553,6 +662,23 @@
     "ahead": "ahead of main",
     "behind": "behind main",
     "loading": "Loading current branch…",
+    "safety": {
+      "workingTree": "Working tree",
+      "cleanTree": "Clean",
+      "dirtyTree": "Local changes",
+      "remote": "Origin",
+      "remoteSynced": "Pushed",
+      "remoteMissing": "Not pushed",
+      "mergePolicy": "Merge to main",
+      "mergeDisabled": "Disabled",
+      "mergeAllowed": "After confirmation",
+      "cleanBeforeFinish": "Clean tree before finish",
+      "preFinishCommand": "Pre-finish command",
+      "configured": "Configured",
+      "notConfigured": "None",
+      "required": "Required",
+      "notRequired": "Not required"
+    },
     "step": {
       "noTask": "First create a task from this branch or link an existing one.",
       "dirty": "You have local changes. Commit or stash them before finishing the task.",
@@ -566,6 +692,7 @@
   },
   "tooltips": {
     "nav": {
+      "today": "A daily work list: overdue, today's, and upcoming tasks with a date-range picker.",
       "board": "Kanban board — your tasks, columns and Git actions.",
       "currentBranch": "Everything about the branch you're on and its task.",
       "commandCenter": "A lead's view: team, branches, risks, activity and deployments.",
@@ -637,7 +764,9 @@
       "deleteLocalBranchAfterMerge": "Deletes the local branch after a successful merge to main.",
       "finishOnMoveToDone": "When you move a task with a branch into the DONE column, runs the safe finish flow (push + optional backup and merge to main with confirmation, per your Git policy). Off by default.",
       "language": "BranchBoard UI language (Polish / English).",
-      "storageMode": "Local JSON in the project, or a shared SQLite database over SSH for the team."
+      "storageMode": "Local JSON in the project, or a shared SQLite database over SSH for the team.",
+      "notifShowToast": "Also show a native VS Code notification toast in addition to the bell dropdown.",
+      "initials": "Shown on your avatar when you don't have a profile photo. Max 2 characters."
     }
   },
   "cc": {

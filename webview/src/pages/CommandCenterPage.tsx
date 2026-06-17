@@ -149,7 +149,10 @@ export function CommandCenterPage(props: Props) {
   return (
     <>
       <DashboardShell
-        title={props.title}
+        board={board}
+        git={props.git}
+        appConfig={props.appConfig}
+        currentUserId={currentUserId}
         tabs={tabs}
         active={tab}
         page={props.page}
@@ -158,6 +161,7 @@ export function CommandCenterPage(props: Props) {
         onOpenSettings={props.onOpenSettings}
         onRefresh={props.onRefresh}
         onOpenInBrowser={props.onOpenInBrowser}
+        onOpenTask={props.onOpenTask}
       >
         {renderBody()}
       </DashboardShell>

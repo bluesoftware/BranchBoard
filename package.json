@@ -350,6 +350,11 @@
           "default": "feature/",
           "description": "Prefix applied to auto-generated feature branch names (e.g. feature/123-add-cart)."
         },
+        "branchBoard.serverAllowEmptyOverwrite": {
+          "type": "boolean",
+          "default": false,
+          "description": "DANGER: allow the extension to overwrite a non-empty server board (SQLite over SSH) with an empty one (0 tasks). Off by default — this is the main data-loss guard. Enable only for an intentional reset, then turn it back off."
+        },
         "branchBoard.runGitActionsOnMove": {
           "type": "boolean",
           "default": true,
@@ -450,6 +455,67 @@
           "type": "boolean",
           "default": false,
           "description": "Reduce UI animations and transitions."
+        },
+        "branchBoard.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch for the persisted notification system (bell, settings below still apply per type)."
+        },
+        "branchBoard.notifications.showToast": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also show a VS Code toast notification when a new notification arrives, in addition to the bell."
+        },
+        "branchBoard.notifications.notifyTaskCreated": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify other users when a new task is created."
+        },
+        "branchBoard.notifications.notifyCommentAdded": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify other users when a comment is added to a task."
+        },
+        "branchBoard.notifications.notifyAssigned": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify a user when they are assigned to a task."
+        },
+        "branchBoard.notifications.notifyBranchPushed": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify other users when a task branch is pushed to the remote."
+        },
+        "branchBoard.notifications.notifyMergeFinished": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify other users when a task branch is merged successfully."
+        },
+        "branchBoard.notifications.notifyMergeFailed": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify other users when a merge or finish-task Git operation fails."
+        },
+        "branchBoard.notifications.notifyTaskMovedToReview": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify other users when a task moves into a review/testing column."
+        },
+        "branchBoard.notifications.notifyTaskDone": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify other users when a task is marked done."
+        },
+        "branchBoard.notifications.soundEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Play a sound when a notification arrives."
+        },
+        "branchBoard.notifications.soundId": {
+          "type": "string",
+          "default": "mail-alert",
+          "enum": ["mail-alert", "bells", "double-beep"],
+          "description": "Which built-in sound to play for notifications."
         }
       }
     }

@@ -2,9 +2,9 @@ import { useState } from "react";
 import { AppConfig, BoardData, GitInfo, UserFilter } from "../types";
 import { t } from "../i18n";
 import { UserSwitcher } from "./UserSwitcher";
-import { MainNav, AppView } from "./navigation/MainNav";
-import { Tooltip } from "./common/Tooltip";
-import { BranchIcon, GearIcon, LogoMark, RefreshIcon, SearchIcon } from "./Icons";
+import { AppHeader } from "./layout/AppHeader";
+import { AppView } from "./navigation/MainNav";
+import { SearchIcon } from "./Icons";
 
 interface Props {
   board: BoardData;
@@ -13,12 +13,16 @@ interface Props {
   currentUserId: string | null;
   filter: UserFilter;
   search: string;
+  showInactive: boolean;
+  inactiveTaskCount: number;
   onFilterChange: (f: UserFilter) => void;
   onSearchChange: (q: string) => void;
+  onShowInactiveChange: (show: boolean) => void;
   onAddColumn: (name: string) => void;
   onRefresh: () => void;
   onSync: () => void;
   onOpenSettings: () => void;
+  onOpenTask?: (taskId: string) => void;
   page: AppView;
   onNavigate: (view: AppView) => void;
 }
@@ -30,12 +34,16 @@ export function TopBar({
   currentUserId,
   filter,
   search,
+  showInactive,
+  inactiveTaskCount,
   onFilterChange,
   onSearchChange,
+  onShowInactiveChange,
   onAddColumn,
   onRefresh,
   onSync,
   onOpenSettings,
+  onOpenTask,
   page,
   onNavigate,
 }: Props) {
@@ -51,42 +59,22 @@ export function TopBar({
     setAdding(false);
   };
 
-  const branchLabel = git?.isRepo
-    ? git.currentBranch ?? t("topBar.detached")
-    : t("topBar.noRepo");
-
   return (
     <header className="bb-topbar">
-      <div className="bb-topbar-left">
-        <span className="bb-brand">
-          <span className="bb-brand-mark">
-            <LogoMark size={18} />
-          </span>
-          <h1 className="bb-title">{board.boardTitle || appConfig.boardTitle}</h1>
-        </span>
-        {appConfig.projectName && appConfig.projectName !== board.boardTitle && (
-          <span className="bb-project">· {appConfig.projectName}</span>
-        )}
-        <span
-          className={`bb-chip bb-branch-chip ${git?.hasUncommittedChanges ? "dirty" : ""}`}
-          title={git?.error ?? ""}
-        >
-          <BranchIcon size={12} />
-          {branchLabel}
-          {git?.hasUncommittedChanges ? " •" : ""}
-        </span>
-        <span
-          className={`bb-chip bb-storage-chip ${appConfig.storageMode === "server" ? "server" : ""}`}
-        >
-          {appConfig.storageMode === "server" ? t("topBar.storageServer") : t("topBar.storageLocal")}
-        </span>
-      </div>
+      <AppHeader
+        board={board}
+        git={git}
+        appConfig={appConfig}
+        currentUserId={currentUserId}
+        page={page}
+        onNavigate={onNavigate}
+        onOpenSettings={onOpenSettings}
+        onRefresh={onRefresh}
+        onSync={onSync}
+        onOpenTask={onOpenTask}
+      />
 
-      <MainNav page={page} onNavigate={onNavigate} />
-
-      <div className="bb-topbar-spacer" />
-
-      <div className="bb-topbar-right">
+      <div className="bb-topbar-row bb-topbar-row-tools">
         <div className="bb-search">
           <SearchIcon size={13} />
           <input
@@ -110,6 +98,19 @@ export function TopBar({
           onChange={onFilterChange}
         />
 
+        <button
+          className={`bb-inactive-switch ${showInactive ? "on" : ""}`}
+          type="button"
+          role="switch"
+          aria-checked={showInactive}
+          title={showInactive ? t("topBar.hideInactive") : t("topBar.showInactive")}
+          onClick={() => onShowInactiveChange(!showInactive)}
+        >
+          <span className="bb-inactive-switch-label">{t("topBar.inactive")}</span>
+          {inactiveTaskCount > 0 && <span className="bb-inactive-switch-count">{inactiveTaskCount}</span>}
+          <span className="bb-inactive-switch-track" aria-hidden="true" />
+        </button>
+
         {adding ? (
           <input
             className="bb-input"
@@ -132,22 +133,6 @@ export function TopBar({
             + {t("topBar.addColumn")}
           </button>
         )}
-
-        <Tooltip text={t("topBar.refresh")}>
-          <button
-            className="bb-btn ghost icon"
-            onClick={onSync}
-            onDoubleClick={onRefresh}
-            aria-label={t("topBar.refresh")}
-          >
-            <RefreshIcon size={13} />
-          </button>
-        </Tooltip>
-        <Tooltip text={t("tooltips.nav.settings")}>
-          <button className="bb-btn ghost icon" onClick={onOpenSettings} aria-label={t("topBar.settings")}>
-            <GearIcon size={14} />
-          </button>
-        </Tooltip>
       </div>
     </header>
   );

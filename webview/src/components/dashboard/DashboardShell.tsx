@@ -1,12 +1,16 @@
 import type { ReactNode } from "react";
+import { AppConfig, BoardData, GitInfo } from "../../types";
 import { t } from "../../i18n";
 import { Tabs, TabItem } from "../common/Tabs";
 import { Tooltip } from "../common/Tooltip";
-import { MainNav, AppView } from "../navigation/MainNav";
-import { GearIcon, RefreshIcon } from "../Icons";
+import { AppView } from "../navigation/MainNav";
+import { AppHeader } from "../layout/AppHeader";
 
 interface Props {
-  title: string;
+  board: BoardData;
+  git: GitInfo | null;
+  appConfig: AppConfig;
+  currentUserId: string | null;
   tabs: TabItem[];
   active: string;
   page: AppView;
@@ -15,12 +19,16 @@ interface Props {
   onOpenSettings: () => void;
   onRefresh: () => void;
   onOpenInBrowser: () => void;
+  onOpenTask?: (taskId: string) => void;
   children: ReactNode;
 }
 
-/** Frame for the Command Center: header (nav / title / actions) + tab strip. */
+/** Frame for the Command Center: the shared AppHeader + a tab strip. */
 export function DashboardShell({
-  title,
+  board,
+  git,
+  appConfig,
+  currentUserId,
   tabs,
   active,
   page,
@@ -29,32 +37,30 @@ export function DashboardShell({
   onOpenSettings,
   onRefresh,
   onOpenInBrowser,
+  onOpenTask,
   children,
 }: Props) {
   return (
     <div className="bb-cc">
-      <header className="bb-cc-header">
-        <div className="bb-cc-header-left">
-          <MainNav page={page} onNavigate={onNavigate} />
-          <h1 className="bb-cc-title">{title}</h1>
-        </div>
-        <div className="bb-cc-header-right">
-          <Tooltip text={t("cc.openInBrowserHint")}>
-            <button className="bb-btn ghost" onClick={onOpenInBrowser}>
-              {t("cc.openInBrowser")}
-            </button>
-          </Tooltip>
-          <Tooltip text={t("cc.refresh")}>
-            <button className="bb-btn ghost icon" onClick={onRefresh} aria-label={t("cc.refresh")}>
-              <RefreshIcon size={13} />
-            </button>
-          </Tooltip>
-          <Tooltip text={t("tooltips.nav.settings")}>
-            <button className="bb-btn ghost icon" onClick={onOpenSettings} aria-label={t("nav.settings")}>
-              <GearIcon size={14} />
-            </button>
-          </Tooltip>
-        </div>
+      <header className="bb-topbar">
+        <AppHeader
+          board={board}
+          git={git}
+          appConfig={appConfig}
+          currentUserId={currentUserId}
+          page={page}
+          onNavigate={onNavigate}
+          onOpenSettings={onOpenSettings}
+          onRefresh={onRefresh}
+          onOpenTask={onOpenTask}
+          extraActions={
+            <Tooltip text={t("cc.openInBrowserHint")}>
+              <button className="bb-btn ghost" onClick={onOpenInBrowser}>
+                {t("cc.openInBrowser")}
+              </button>
+            </Tooltip>
+          }
+        />
       </header>
 
       <Tabs tabs={tabs} active={active} onChange={onChange} />

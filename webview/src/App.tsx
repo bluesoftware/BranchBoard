@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppConfig,
   BoardData,
@@ -23,9 +23,10 @@ import { ColumnConfigModal } from "./components/ColumnConfigModal";
 import { CommandCenterPage } from "./pages/CommandCenterPage";
 import { BranchMapPage } from "./pages/BranchMapPage";
 import { CurrentBranchPage } from "./pages/CurrentBranchPage";
+import { TodayTasksPage } from "./pages/TodayTasksPage";
 import { buildAiPrompt } from "./utils";
 
-type Page = "board" | "currentBranch" | "command" | "branchMap";
+type Page = "board" | "today" | "currentBranch" | "command" | "branchMap";
 
 const DEFAULT_APP_CONFIG: AppConfig = {
   language: "pl",
@@ -49,6 +50,21 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     showPriority: true,
     reduceAnimations: false,
   },
+  notifications: {
+    enabled: true,
+    showToast: true,
+    notifyTaskCreated: true,
+    notifyCommentAdded: true,
+    notifyAssigned: true,
+    notifyBranchPushed: true,
+    notifyMergeFinished: true,
+    notifyMergeFailed: true,
+    notifyTaskMovedToReview: true,
+    notifyTaskDone: true,
+    soundEnabled: true,
+    soundId: "mail-alert",
+  },
+  soundFiles: {},
   policy: {
     allowDirectMergeToMain: false,
     requireConfirmationBeforeMerge: true,
@@ -77,6 +93,9 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     hookTimeoutSeconds: 120,
     useDevBranch: true,
     defaultBranchPrefix: "feature/",
+    devBranch: "dev",
+    runGitActionsOnMove: true,
+    confirmGitActionsOnMove: true,
   },
 };
 
@@ -86,6 +105,7 @@ export function App() {
   const [appConfig, setAppConfig] = useState<AppConfig>(DEFAULT_APP_CONFIG);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [filter, setFilter] = useState<UserFilter>("all");
+  const [showInactive, setShowInactive] = useState(true);
   const [search, setSearch] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [configColumnId, setConfigColumnId] = useState<string | null>(null);
@@ -147,7 +167,7 @@ export function App() {
           setCommitDetailLoading(false);
           break;
         case "navigate":
-          if (msg.payload?.page === "command" || msg.payload?.page === "board") {
+          if (["command", "board", "today", "currentBranch", "branchMap"].includes(msg.payload?.page)) {
             setPage(msg.payload.page);
           }
           break;
@@ -179,6 +199,33 @@ export function App() {
     post("ready");
     return () => window.removeEventListener("message", handler);
   }, [pushToast]);
+
+  // Play a sound when a *new* unread notification arrives for the current user.
+  // Skip the very first board load so we don't replay a sound for notifications
+  // that were already unread before this webview session started.
+  const lastUnreadIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!board || !currentUserId) {
+      return;
+    }
+    const unreadIds = new Set(
+      board.notifications
+        .filter((n) => n.recipientUserIds.includes(currentUserId) && !n.readBy.includes(currentUserId))
+        .map((n) => n.id)
+    );
+    const previous = lastUnreadIdsRef.current;
+    if (previous) {
+      const hasNew = [...unreadIds].some((id) => !previous.has(id));
+      if (hasNew && appConfig.notifications.soundEnabled) {
+        const src = appConfig.soundFiles[appConfig.notifications.soundId];
+        if (src) {
+          const audio = new Audio(src);
+          void audio.play().catch(() => undefined);
+        }
+      }
+    }
+    lastUnreadIdsRef.current = unreadIds;
+  }, [board, currentUserId, appConfig.notifications.soundEnabled, appConfig.notifications.soundId, appConfig.soundFiles]);
 
   // Keyboard shortcuts: "/" focus search, "n" new task, "esc" close panels.
   useEffect(() => {
@@ -227,6 +274,22 @@ export function App() {
     [board]
   );
 
+  const isDoneColumn = useCallback(
+    (columnId: string): boolean => {
+      const col = board?.columns.find((c) => c.id === columnId);
+      if (!col) {
+        return false;
+      }
+      return col.id === "done" || /zrobione|gotowe|\bdone\b|ukończ|ukoncz/i.test(col.name);
+    },
+    [board]
+  );
+
+  const isInactiveTask = useCallback(
+    (task: BoardTask): boolean => task.status === "done" || !!task.finishedAt || isDoneColumn(task.columnId),
+    [isDoneColumn]
+  );
+
   const matchesSearch = useCallback(
     (task: BoardTask): boolean => {
       const q = search.trim().toLowerCase();
@@ -266,12 +329,12 @@ export function App() {
         case "needs-review":
           return isReviewColumn(task.columnId);
         case "done":
-          return task.status === "done";
+          return isInactiveTask(task);
         default:
           return task.assignedUserId === filter;
       }
     },
-    [filter, currentUserId, git, isReviewColumn]
+    [filter, currentUserId, git, isReviewColumn, isInactiveTask]
   );
 
   const visibleTasks = useCallback(
@@ -280,10 +343,21 @@ export function App() {
         return [];
       }
       return board.tasks
-        .filter((task) => task.columnId === columnId && matchesFilter(task) && matchesSearch(task))
+        .filter(
+          (task) =>
+            task.columnId === columnId &&
+            (showInactive || !isInactiveTask(task)) &&
+            matchesFilter(task) &&
+            matchesSearch(task)
+        )
         .sort((a, b) => a.position - b.position);
     },
-    [board, matchesFilter, matchesSearch]
+    [board, showInactive, isInactiveTask, matchesFilter, matchesSearch]
+  );
+
+  const inactiveTaskCount = useMemo(
+    () => (board ? board.tasks.filter((task) => isInactiveTask(task)).length : 0),
+    [board, isInactiveTask]
   );
 
   const appClass = [
@@ -332,7 +406,7 @@ export function App() {
 
   const navigateTo = (view: Page) => {
     setPage(view);
-    if (view !== "board") {
+    if (view !== "board" && view !== "today") {
       post("getDashboardData");
     }
   };
@@ -347,6 +421,7 @@ export function App() {
       onSave={(patch) => post("saveSettings", { patch })}
       onAddUser={(name, email) => post("addUser", { name, email })}
       onDeleteUser={(userId) => post("deleteUser", { userId })}
+      onUpdateUser={(userId, patch) => post("updateUser", { userId, patch })}
       onSyncUsers={() => post("syncUsers")}
       onSyncNow={() => post("syncNow")}
       onSelectSshKey={() => post("selectSshKey")}
@@ -436,6 +511,7 @@ export function App() {
         onCreateBackup={() => post("createBackupBranch", { branchName: activeTask.branchName })}
         onCreateSafetyTag={() => post("createSafetyTag", { taskId: activeTask.id })}
         onRevertLastCommit={() => post("revertLastCommit", { branchName: activeTask.branchName })}
+        onRevertFromOrigin={() => post("revertFromOrigin", { branchName: activeTask.branchName })}
         onOpenExternal={(url) => post("openExternal", { url })}
         onOpenFile={(path) => post("openFile", { path })}
         onOpenDiff={(path) => post("openDiff", { branchName: activeTask.branchName, path })}
@@ -444,6 +520,32 @@ export function App() {
       />
     );
   };
+
+  if (page === "today") {
+    return (
+      <div className={appClass}>
+        <TodayTasksPage
+          board={board}
+          git={git}
+          appConfig={appConfig}
+          currentUserId={currentUserId}
+          page="today"
+          onNavigate={navigateTo}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onRefresh={() => post("refresh")}
+          onOpenTask={openTaskFromDashboard}
+          onToggleDone={(task) =>
+            post("updateTask", {
+              id: task.id,
+              patch: { status: task.status === "done" ? "open" : "done" },
+            })
+          }
+        />
+        {renderTaskDrawer()}
+        {settingsOpen && renderSettings()}
+      </div>
+    );
+  }
 
   if (page === "command") {
     return (
@@ -609,12 +711,16 @@ export function App() {
         currentUserId={currentUserId}
         filter={filter}
         search={search}
+        showInactive={showInactive}
+        inactiveTaskCount={inactiveTaskCount}
         onFilterChange={setFilter}
         onSearchChange={setSearch}
+        onShowInactiveChange={setShowInactive}
         onAddColumn={(name) => post("addColumn", { name })}
         onRefresh={() => post("refresh")}
         onSync={() => post("syncNow")}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenTask={openTask}
         page={page}
         onNavigate={navigateTo}
       />
@@ -671,6 +777,7 @@ export function App() {
           <ColumnConfigModal
             column={col}
             allowedCommands={appConfig.policy.allowedCommands}
+            policy={appConfig.policy}
             onClose={() => setConfigColumnId(null)}
             onSave={(id, patch) => post("saveColumnConfig", { id, patch })}
           />

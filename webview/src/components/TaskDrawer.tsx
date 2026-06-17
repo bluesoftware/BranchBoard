@@ -11,6 +11,8 @@ import {
   GitInfo,
   TaskAI,
   TaskPriority,
+  TaskType,
+  TASK_TYPES,
 } from "../types";
 import { t } from "../i18n";
 import { buildAiPrompt, formatDate, slugify, suggestBranchName } from "../utils";
@@ -47,6 +49,7 @@ interface Props {
   onCreateBackup: () => void;
   onCreateSafetyTag: () => void;
   onRevertLastCommit: () => void;
+  onRevertFromOrigin: () => void;
   onOpenExternal: (url: string) => void;
   onOpenFile: (path: string) => void;
   onOpenDiff: (path: string) => void;
@@ -115,7 +118,6 @@ export function TaskDrawer(props: Props) {
   const { task, board, git, appConfig } = props;
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
-  const [acceptance, setAcceptance] = useState(task.acceptanceCriteria ?? "");
   const [branchName, setBranchName] = useState(task.branchName);
   const [fileInput, setFileInput] = useState("");
 
@@ -145,9 +147,8 @@ export function TaskDrawer(props: Props) {
   useEffect(() => {
     setTitle(task.title);
     setDescription(task.description);
-    setAcceptance(task.acceptanceCriteria ?? "");
     setBranchName(task.branchName);
-  }, [task.id, task.title, task.description, task.branchName, task.acceptanceCriteria]);
+  }, [task.id, task.title, task.description, task.branchName]);
 
   const checklist = task.checklist ?? [];
 
@@ -292,6 +293,24 @@ export function TaskDrawer(props: Props) {
             <SectionHead title={t("task.details")} help={t("task.help.details")} />
             <div className="bb-field-row">
               <div className="bb-field">
+                <LabelHelp label={t("task.type")} help={t("task.help.type")} />
+                <select
+                  className="bb-input"
+                  value={task.taskType ?? "feature"}
+                  onChange={(e) => saveField({ taskType: e.target.value as TaskType })}
+                  disabled={!!task.branchName}
+                  title={task.branchName ? t("task.typeLockedHint") : undefined}
+                >
+                  {TASK_TYPES.map((tp) => (
+                    <option key={tp} value={tp}>
+                      {t(`taskType.${tp}`)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="bb-field-row">
+              <div className="bb-field">
                 <LabelHelp label={t("task.assignee")} help={t("task.help.assignee")} />
                 <select
                   className="bb-input"
@@ -379,20 +398,12 @@ export function TaskDrawer(props: Props) {
               />
             </div>
 
-            <div className="bb-field">
-              <LabelHelp label={t("task.acceptance")} help={t("task.help.acceptance")} />
-              <textarea
-                className="bb-input"
-                rows={3}
-                value={acceptance}
-                placeholder={t("task.acceptancePlaceholder")}
-                onChange={(e) => setAcceptance(e.target.value)}
-                onBlur={() =>
-                  acceptance !== (task.acceptanceCriteria ?? "") &&
-                  saveField({ acceptanceCriteria: acceptance })
-                }
-              />
-            </div>
+            {/* Checklist + comments live right here — the highest-traffic part of a
+                task, kept above the fold since drawer space is tight. Acceptance
+                criteria as a separate field was removed; the AI prompt now derives
+                it from unchecked checklist items (see utils.buildAiPrompt). */}
+            <Checklist items={checklist} onChange={saveChecklist} />
+            <Comments comments={task.comments} users={board.users} currentUserId={props.currentUserId} onAdd={props.onAddComment} />
 
             {/* Attached project files (fed into the AI prompt) */}
             <div className="bb-field">
@@ -646,6 +657,14 @@ export function TaskDrawer(props: Props) {
                 {t("task.safety.revertLast")}
               </button>
               <button
+                className="bb-btn danger"
+                disabled={!gitEnabled || !branchName}
+                title={t("task.tip.revertFromOrigin")}
+                onClick={props.onRevertFromOrigin}
+              >
+                {t("task.safety.revertFromOrigin")}
+              </button>
+              <button
                 className="bb-btn"
                 title={t("task.tip.guide")}
                 onClick={() => props.onOpenExternal("https://git-scm.com/docs/git-revert")}
@@ -715,11 +734,6 @@ export function TaskDrawer(props: Props) {
             )}
           </div>
 
-          {/* 8 ── Checklist */}
-          <Checklist items={checklist} onChange={saveChecklist} />
-
-          {/* 9 ── Comments */}
-          <Comments comments={task.comments} users={board.users} onAdd={props.onAddComment} />
         </div>
 
         <div className="bb-drawer-foot">

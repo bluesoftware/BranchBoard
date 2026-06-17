@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { AppConfig, BoardData, ConnectionTestResult, GitInfo } from "../types";
+import { useRef, useState } from "react";
+import { AppConfig, BoardData, BoardUser, ConnectionTestResult, GitInfo } from "../types";
 import { t } from "../i18n";
 import { HelpIcon } from "./common/HelpIcon";
 
@@ -14,6 +14,7 @@ interface Props {
   onSave: (patch: Record<string, unknown>) => void;
   onAddUser: (name: string, email: string) => void;
   onDeleteUser: (userId: string) => void;
+  onUpdateUser: (userId: string, patch: Partial<BoardUser>) => void;
   onSyncUsers: () => void;
   onSyncNow: () => void;
   onSelectSshKey: () => void;
@@ -21,7 +22,154 @@ interface Props {
   onShowLogs: () => void;
 }
 
-type Tab = "general" | "git" | "users" | "appearance" | "sync" | "ai";
+const AVATAR_PALETTE = [
+  "#38bdf8", "#f472b6", "#34d399", "#fbbf24",
+  "#a78bfa", "#fb7185", "#60a5fa", "#f59e0b",
+  "#4ade80", "#e879f9", "#22d3ee", "#facc15",
+];
+
+const MAX_PHOTO_BYTES = 350 * 1024; // keep board.json reasonably sized
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function ProfileEditor({
+  user,
+  onUpdate,
+}: {
+  user: BoardUser;
+  onUpdate: (patch: Partial<BoardUser>) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setPhotoError(t("settings.profilePhotoInvalid"));
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setPhotoError(t("settings.profilePhotoTooLarge"));
+      return;
+    }
+    setPhotoError(null);
+    const dataUrl = await readFileAsDataUrl(file);
+    onUpdate({ avatarPhoto: dataUrl });
+  };
+
+  return (
+    <div className="bb-section bb-profile-editor">
+      <div className="bb-section-title">{t("settings.myProfile")}</div>
+      <div className="bb-profile-row">
+        <span
+          className={`bb-avatar bb-avatar-lg ${user.avatarPhoto ? "has-photo" : ""}`}
+          style={
+            user.avatarPhoto
+              ? { backgroundImage: `url(${user.avatarPhoto})` }
+              : { background: user.color }
+          }
+        >
+          {!user.avatarPhoto && user.avatarText}
+        </span>
+        <div className="bb-profile-photo-actions">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              void pickPhoto(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+          <button className="bb-btn ghost" onClick={() => fileRef.current?.click()}>
+            {t("settings.uploadPhoto")}
+          </button>
+          {user.avatarPhoto && (
+            <button className="bb-btn ghost" onClick={() => onUpdate({ avatarPhoto: "" })}>
+              {t("settings.removePhoto")}
+            </button>
+          )}
+          {photoError && <div className="bb-field-error">{photoError}</div>}
+        </div>
+      </div>
+
+      <div className="bb-field-row">
+        <div className="bb-field">
+          <label>{t("settings.userName")}</label>
+          <input
+            className="bb-input"
+            defaultValue={user.name}
+            onBlur={(e) => {
+              if (e.target.value.trim()) {
+                onUpdate({ name: e.target.value });
+              }
+            }}
+          />
+        </div>
+        <div className="bb-field">
+          <label>{t("settings.userEmail")}</label>
+          <input
+            className="bb-input"
+            defaultValue={user.email}
+            onBlur={(e) => onUpdate({ email: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="bb-field">
+        <label className="bb-label-help">
+          {t("settings.initials")}
+          <HelpIcon text={t("tooltips.settings.initials")} />
+        </label>
+        <input
+          className="bb-input bb-mono"
+          style={{ width: 70 }}
+          maxLength={2}
+          defaultValue={user.avatarText}
+          onBlur={(e) => {
+            if (e.target.value.trim()) {
+              onUpdate({ avatarText: e.target.value.toUpperCase() });
+            }
+          }}
+        />
+      </div>
+
+      <div className="bb-field">
+        <label>{t("settings.avatarColor")}</label>
+        <div className="bb-color-swatches">
+          {AVATAR_PALETTE.map((c) => (
+            <button
+              key={c}
+              className={`bb-swatch ${user.color === c ? "active" : ""}`}
+              style={{ background: c }}
+              title={c}
+              onClick={() => onUpdate({ color: c })}
+            />
+          ))}
+          <input
+            type="color"
+            className="bb-swatch bb-swatch-custom"
+            value={user.color}
+            onChange={(e) => onUpdate({ color: e.target.value })}
+            title={t("settings.customColor")}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type Tab = "general" | "git" | "users" | "appearance" | "notifications" | "sync" | "ai";
 
 function Toggle({
   value,
@@ -45,6 +193,70 @@ function Toggle({
   );
 }
 
+const SOUND_LABEL_KEYS: Record<string, string> = {
+  "mail-alert": "settings.notifSoundMailAlert",
+  bells: "settings.notifSoundBells",
+  "double-beep": "settings.notifSoundDoubleBeep",
+};
+
+function SoundPicker({
+  soundFiles,
+  value,
+  disabled,
+  onChange,
+}: {
+  soundFiles: Record<string, string>;
+  value: string;
+  disabled: boolean;
+  onChange: (id: string) => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+
+  const preview = (id: string) => {
+    const src = soundFiles[id];
+    if (!src) {
+      return;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    const audio = new Audio(src);
+    audioRef.current = audio;
+    setPlayingId(id);
+    audio.addEventListener("ended", () => setPlayingId((cur) => (cur === id ? null : cur)));
+    void audio.play().catch(() => setPlayingId((cur) => (cur === id ? null : cur)));
+  };
+
+  return (
+    <div className="bb-sound-picker">
+      {Object.keys(SOUND_LABEL_KEYS).map((id) => (
+        <div key={id} className={`bb-sound-option ${value === id ? "active" : ""}`}>
+          <label className="bb-sound-radio">
+            <input
+              type="radio"
+              name="notif-sound"
+              checked={value === id}
+              disabled={disabled}
+              onChange={() => onChange(id)}
+            />
+            {t(SOUND_LABEL_KEYS[id])}
+          </label>
+          <button
+            type="button"
+            className="bb-iconbtn bb-sound-preview"
+            title={t("settings.notifSoundPreview")}
+            disabled={!soundFiles[id]}
+            onClick={() => preview(id)}
+          >
+            {playingId === id ? "⏸" : "▶"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function SettingsDrawer(props: Props) {
   const { appConfig, board, git } = props;
   const [tab, setTab] = useState<Tab>("general");
@@ -54,6 +266,7 @@ export function SettingsDrawer(props: Props) {
   const save = (key: string, value: unknown) => props.onSave({ [key]: value });
   const p = appConfig.policy;
   const a = appConfig.appearance;
+  const nf = appConfig.notifications;
   const ssh = appConfig.ssh;
   const activeServer = appConfig.activeStorageKind === "server";
   const conn = props.connectionStatus;
@@ -71,7 +284,7 @@ export function SettingsDrawer(props: Props) {
         </div>
 
         <div className="bb-settings-tabs">
-          {(["general", "git", "users", "appearance", "sync", "ai"] as Tab[]).map((key) => (
+          {(["general", "git", "users", "appearance", "notifications", "sync", "ai"] as Tab[]).map((key) => (
             <button
               key={key}
               className={`bb-tab ${tab === key ? "active" : ""}`}
@@ -219,6 +432,17 @@ export function SettingsDrawer(props: Props) {
                   {git?.userEmail ? ` · ${git.userEmail}` : ""}
                 </div>
               </div>
+
+              {(() => {
+                const me = board.users.find((u) => u.id === props.currentUserId);
+                return me ? (
+                  <ProfileEditor
+                    user={me}
+                    onUpdate={(patch) => props.onUpdateUser(me.id, patch)}
+                  />
+                ) : null;
+              })()}
+
               <div className="bb-section">
                 <div className="bb-section-title">{t("settings.importedUsers")}</div>
                 {board.users.map((u) => (
@@ -286,6 +510,79 @@ export function SettingsDrawer(props: Props) {
               <Toggle label={t("settings.showAvatars")} value={a.showAvatars} onChange={(v) => save("appearance.showAvatars", v)} />
               <Toggle label={t("settings.showPriority")} value={a.showPriority} onChange={(v) => save("appearance.showPriority", v)} />
               <Toggle label={t("settings.reduceAnimations")} value={a.reduceAnimations} onChange={(v) => save("appearance.reduceAnimations", v)} />
+            </>
+          )}
+
+          {tab === "notifications" && (
+            <>
+              <Toggle
+                label={t("settings.notifEnabled")}
+                value={nf.enabled}
+                onChange={(v) => save("notifications.enabled", v)}
+              />
+              <Toggle
+                label={t("settings.notifShowToast")}
+                help={t("tooltips.settings.notifShowToast")}
+                value={nf.showToast}
+                onChange={(v) => save("notifications.showToast", v)}
+              />
+              <div className="bb-section">
+                <div className="bb-section-title">{t("settings.notifTypesSection")}</div>
+                <Toggle
+                  label={t("settings.notifTaskCreated")}
+                  value={nf.notifyTaskCreated}
+                  onChange={(v) => save("notifications.notifyTaskCreated", v)}
+                />
+                <Toggle
+                  label={t("settings.notifCommentAdded")}
+                  value={nf.notifyCommentAdded}
+                  onChange={(v) => save("notifications.notifyCommentAdded", v)}
+                />
+                <Toggle
+                  label={t("settings.notifAssigned")}
+                  value={nf.notifyAssigned}
+                  onChange={(v) => save("notifications.notifyAssigned", v)}
+                />
+                <Toggle
+                  label={t("settings.notifBranchPushed")}
+                  value={nf.notifyBranchPushed}
+                  onChange={(v) => save("notifications.notifyBranchPushed", v)}
+                />
+                <Toggle
+                  label={t("settings.notifMergeFinished")}
+                  value={nf.notifyMergeFinished}
+                  onChange={(v) => save("notifications.notifyMergeFinished", v)}
+                />
+                <Toggle
+                  label={t("settings.notifMergeFailed")}
+                  value={nf.notifyMergeFailed}
+                  onChange={(v) => save("notifications.notifyMergeFailed", v)}
+                />
+                <Toggle
+                  label={t("settings.notifTaskMovedToReview")}
+                  value={nf.notifyTaskMovedToReview}
+                  onChange={(v) => save("notifications.notifyTaskMovedToReview", v)}
+                />
+                <Toggle
+                  label={t("settings.notifTaskDone")}
+                  value={nf.notifyTaskDone}
+                  onChange={(v) => save("notifications.notifyTaskDone", v)}
+                />
+              </div>
+              <div className="bb-section">
+                <div className="bb-section-title">{t("settings.notifSoundSection")}</div>
+                <Toggle
+                  label={t("settings.notifSoundEnabled")}
+                  value={nf.soundEnabled}
+                  onChange={(v) => save("notifications.soundEnabled", v)}
+                />
+                <SoundPicker
+                  soundFiles={appConfig.soundFiles}
+                  value={nf.soundId}
+                  disabled={!nf.soundEnabled}
+                  onChange={(id) => save("notifications.soundId", id)}
+                />
+              </div>
             </>
           )}
 

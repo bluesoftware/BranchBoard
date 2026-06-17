@@ -6,9 +6,12 @@ import {
   ChecklistItem,
   BoardEvent,
   BoardEventType,
+  BoardNotificationRecord,
+  NotificationType,
 } from "../types";
 import { StorageProvider } from "./StorageProvider";
 import { EventService } from "./EventService";
+import { NotificationService } from "./NotificationService";
 
 export interface BoardNotification {
   message: string;
@@ -35,10 +38,11 @@ export class BoardService {
     return this.board;
   }
 
-  /** Guarantee the v3 collections exist regardless of the storage backend. */
+  /** Guarantee the v3/v4 collections exist regardless of the storage backend. */
   private ensureArrays(board: BoardData): BoardData {
     board.events = Array.isArray(board.events) ? board.events : [];
     board.deployments = Array.isArray(board.deployments) ? board.deployments : [];
+    board.notifications = Array.isArray(board.notifications) ? board.notifications : [];
     return board;
   }
 
@@ -54,6 +58,22 @@ export class BoardService {
     await this.init();
     this.emitBoard();
     return this.getBoard();
+  }
+
+  /**
+   * Put a board into memory WITHOUT persisting it, and wire external-change
+   * listening. Used when the server is reachable but has no board yet: the UI
+   * can render an onboarding/empty state, and nothing is written until the user
+   * explicitly creates a board.
+   */
+  async initWithBoard(board: BoardData): Promise<BoardData> {
+    this.disposeExternal?.();
+    this.board = this.ensureArrays(board);
+    this.disposeExternal = this.storage.onExternalChange((incoming) => {
+      this.applyExternal(this.ensureArrays(incoming));
+    });
+    this.emitBoard();
+    return this.board;
   }
 
   getBoard(): BoardData {
@@ -101,8 +121,36 @@ export class BoardService {
     if (!this.board) {
       return;
     }
-    await this.storage.save(this.board);
+    // Optimistic UI update: the in-memory board is already mutated by the
+    // caller, so push it to listeners (and thus the webview) immediately.
+    // For local JSON storage this was already instant; for the remote/server
+    // backend (SSH + sqlite3) the save below involves one or two round trips
+    // and used to block the UI update until it finished, which felt slow.
+    // Now the UI updates right away and the slow write happens in the
+    // background — if it fails, recoverFromFailedSave() reloads the
+    // authoritative board so the UI never drifts from what's actually saved.
     this.emitBoard();
+    try {
+      await this.storage.save(this.board);
+    } catch (err) {
+      await this.recoverFromFailedSave();
+      throw err;
+    }
+  }
+
+  /**
+   * After a failed save, reload the authoritative board from storage and
+   * notify listeners so the UI rolls back to what's really persisted instead
+   * of showing an optimistic change that never made it to the database.
+   */
+  private async recoverFromFailedSave(): Promise<void> {
+    try {
+      this.board = this.ensureArrays(await this.storage.load());
+      this.emitBoard();
+    } catch {
+      // Reload failed too (e.g. offline) — keep the optimistic in-memory
+      // state; the next successful sync will reconcile it.
+    }
   }
 
   /** Apply a board that changed outside this instance, raising notifications. */
@@ -189,6 +237,73 @@ export class BoardService {
     await this.persist();
   }
 
+  /* ---------------- Notifications ---------------- */
+
+  /**
+   * Create and store a persisted notification, then persist the board.
+   * Defaults the recipient list to "every other board user" when not given,
+   * and never sends a notification to its own actor.
+   */
+  async addNotification(
+    type: NotificationType,
+    fields: {
+      title: string;
+      message: string;
+      taskId?: string | null;
+      branchName?: string | null;
+      actorUserId?: string | null;
+      recipientUserIds?: string[];
+    }
+  ): Promise<BoardNotificationRecord | undefined> {
+    const board = this.getBoard();
+    const actorUserId = fields.actorUserId ?? this.currentUserId ?? null;
+    // Only auto-exclude the actor when we fall back to the "everyone" default
+    // (broadcast-style events such as a new task or a comment, where the
+    // person who acted doesn't need to be told about their own action).
+    // When the caller passes an explicit recipient list (e.g. "this merge
+    // you just ran finished", "you were assigned"), trust it as-is — the
+    // actor is very often the intended recipient there and must not be
+    // silently dropped.
+    const recipients = fields.recipientUserIds
+      ? Array.from(new Set(fields.recipientUserIds))
+      : NotificationService.everyoneExcept(board, actorUserId).filter((id) => id !== actorUserId);
+    const record = NotificationService.create(type, {
+      title: fields.title,
+      message: fields.message,
+      taskId: fields.taskId ?? null,
+      branchName: fields.branchName ?? null,
+      actorUserId,
+      recipientUserIds: recipients,
+    });
+    NotificationService.append(board, record);
+    await this.persist();
+    return recipients.length > 0 ? record : undefined;
+  }
+
+  /** All notifications addressed to a user, newest first. */
+  getNotificationsFor(userId: string, onlyUnread = false): BoardNotificationRecord[] {
+    return NotificationService.listFor(this.getBoard(), userId, onlyUnread);
+  }
+
+  /** Unread notification count for a user (for the bell badge). */
+  getUnreadNotificationCount(userId: string): number {
+    return NotificationService.unreadCount(this.getBoard(), userId);
+  }
+
+  async markNotificationRead(notificationId: string, userId: string): Promise<void> {
+    const board = this.getBoard();
+    if (NotificationService.markRead(board, notificationId, userId)) {
+      await this.persist();
+    }
+  }
+
+  async markAllNotificationsRead(userId: string): Promise<void> {
+    const board = this.getBoard();
+    if (NotificationService.markAllRead(board, userId) > 0) {
+      await this.persist();
+    }
+  }
+
   /* ---------------- Deployments ---------------- */
 
   /** Insert or replace a deployment record (matched by id), then persist. */
@@ -242,6 +357,7 @@ export class BoardService {
       assignedUserId: input.assignedUserId ?? null,
       branchName: input.branchName ?? "",
       priority: input.priority ?? "none",
+      taskType: input.taskType ?? "feature",
       comments: input.comments ?? [],
       checklist: input.checklist ?? [],
       createdAt: now,
@@ -558,6 +674,40 @@ export class BoardService {
   }
 
   /**
+   * Update a user's own profile fields (name, email, avatar initials, color,
+   * photo). Used by the "My profile" editor in Settings. Only the provided
+   * fields are changed; everything else (id, tasks, etc.) is left untouched.
+   */
+  async updateUser(
+    userId: string,
+    patch: Partial<Pick<BoardData["users"][number], "name" | "email" | "avatarText" | "color" | "avatarPhoto">>
+  ): Promise<BoardData["users"][number] | null> {
+    const board = this.getBoard();
+    const user = board.users.find((u) => u.id === userId);
+    if (!user) {
+      return null;
+    }
+    if (typeof patch.name === "string" && patch.name.trim()) {
+      user.name = patch.name.trim();
+    }
+    if (typeof patch.email === "string") {
+      user.email = patch.email.trim();
+    }
+    if (typeof patch.avatarText === "string" && patch.avatarText.trim()) {
+      user.avatarText = patch.avatarText.trim().slice(0, 2).toUpperCase();
+    }
+    if (typeof patch.color === "string" && patch.color.trim()) {
+      user.color = patch.color.trim();
+    }
+    if ("avatarPhoto" in patch) {
+      // Empty string / null clears the photo (falls back to initials).
+      user.avatarPhoto = patch.avatarPhoto || undefined;
+    }
+    await this.persist();
+    return user;
+  }
+
+  /**
    * Remove a user from the board. Any tasks assigned to them are unassigned so
    * no task ends up pointing at a non-existent user.
    */
@@ -577,10 +727,20 @@ export class BoardService {
     await this.persist();
   }
 
-  /** Replace the entire board (used by external reloads / imports). */
+  /** Replace the entire board (used by external reloads / imports). Persists. */
   async replaceBoard(board: BoardData): Promise<void> {
     this.board = this.ensureArrays(board);
     await this.persist();
+  }
+
+  /**
+   * Reload from storage and apply in memory WITHOUT writing back. Used by the
+   * periodic server poll so it never echoes data straight back to the server
+   * (which both wastes writes and races with the user's own saves).
+   */
+  async refreshFromStorage(): Promise<void> {
+    const fresh = this.ensureArrays(await this.storage.load());
+    this.applyExternal(fresh);
   }
 
   /** Find the review/done column to drop a finished task into. */

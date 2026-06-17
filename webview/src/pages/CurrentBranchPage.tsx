@@ -8,7 +8,7 @@ import { Badge, BadgeTone } from "../components/common/Badge";
 import { Tooltip } from "../components/common/Tooltip";
 import { HelpIcon } from "../components/common/HelpIcon";
 import { EmptyState } from "../components/common/EmptyState";
-import { FileIcon } from "../components/Icons";
+import { BranchIcon, CopyIcon, FinishIcon, PushIcon, RefreshIcon, SparkleIcon } from "../components/Icons";
 import { WorkLog } from "../components/task/WorkLog";
 import { Checklist } from "../components/task/Checklist";
 import { Comments } from "../components/task/Comments";
@@ -51,6 +51,13 @@ const STATUS_TONE: Record<string, BadgeTone> = {
   C: "info",
 };
 
+const RISK_LABEL_KEY: Record<string, string> = {
+  low: "branchMap.riskLow",
+  medium: "branchMap.riskMedium",
+  high: "branchMap.riskHigh",
+  critical: "branchMap.riskCritical",
+};
+
 function timeLabels() {
   return { now: t("cc.time.now"), m: t("cc.time.m"), h: t("cc.time.h"), d: t("cc.time.d") };
 }
@@ -83,12 +90,14 @@ export function CurrentBranchPage(props: Props) {
       board={board}
       git={git}
       appConfig={props.appConfig}
+      currentUserId={currentUserId}
       onNavigate={props.onNavigate}
       onOpenSettings={props.onOpenSettings}
       onRefresh={() => {
         props.onRefresh();
         if (branch) props.onRequestBranchDetail(branch);
       }}
+      onOpenTask={props.onOpenTask}
     />
   );
 
@@ -156,42 +165,174 @@ export function CurrentBranchPage(props: Props) {
     "git diff > branchboard-transfer.patch",
   ].join("\n");
 
+  const policy = props.appConfig.policy;
+  const sortedColumns = [...board.columns].sort((a, b) => a.position - b.position);
+  const assignee = task ? board.users.find((u) => u.id === task.assignedUserId) ?? null : null;
+  const checklistDone = task?.checklist?.filter((item) => item.done).length ?? 0;
+  const checklistTotal = task?.checklist?.length ?? 0;
+  const hasRemote = row?.info.existsRemote ?? false;
+  const canDeployDev = !!task && !!policy.devDeployCommand;
+  const branchTitle = branch ?? "";
+  const riskTone = row?.riskLevel ?? "low";
+  const riskKey = RISK_LABEL_KEY[riskTone] ?? "branchMap.riskLow";
+
+  const statusPills = (
+    <div className="bb-cb-status-pills">
+      {row && (
+        <Tooltip text={t("tooltips.currentBranch.aheadBehind")} side="bottom">
+          <Badge tone={row.info.commitsBehindMain > 0 ? "warning" : "info"}>
+            ↑{row.info.commitsAheadMain} ↓{row.info.commitsBehindMain}
+          </Badge>
+        </Tooltip>
+      )}
+      {row && <Badge tone={riskTone}>{t(riskKey)}</Badge>}
+      <Badge tone={git.hasUncommittedChanges ? "warning" : "success"}>
+        {git.hasUncommittedChanges ? t("currentBranch.safety.dirtyTree") : t("currentBranch.safety.cleanTree")}
+      </Badge>
+      {row && (
+        <Badge tone={hasRemote ? "success" : "warning"}>
+          {hasRemote ? t("currentBranch.safety.remoteSynced") : t("currentBranch.safety.remoteMissing")}
+        </Badge>
+      )}
+      {row?.info.deployedToDev && <Badge tone="info">DEV</Badge>}
+    </div>
+  );
+
+  const actionBar = (
+    <div className="bb-cb-actionbar">
+      <Tooltip text={t("tooltips.git.push")} side="bottom">
+        <button className="bb-btn" disabled={!branch} onClick={() => branch && props.onPush(branch)}>
+          <PushIcon />
+          {t("currentBranch.pushBranch")}
+        </button>
+      </Tooltip>
+      {task && (
+        <button className="bb-btn accent" disabled={!branch} onClick={() => props.onFinish(task.id)} title={t("task.finishHint")}>
+          <FinishIcon />
+          {t("currentBranch.finishTask")}
+        </button>
+      )}
+      <Tooltip text={t("tooltips.deploy.dev")} side="bottom">
+        <button className="bb-btn" disabled={!canDeployDev} onClick={() => task && props.onDeployDev(task.id)}>
+          {t("currentBranch.deployToDev")}
+        </button>
+      </Tooltip>
+      <button className="bb-btn" disabled={!branch} onClick={() => branch && props.onCopy(branch, t("toast.branchNameCopied"))}>
+        <CopyIcon />
+        {t("currentBranch.copyBranchName")}
+      </button>
+      <Tooltip text={t("tooltips.ai.copyPrompt")} side="bottom">
+        <button className="bb-btn" disabled={!task} onClick={() => task && props.onCopyAiPrompt(task.id)}>
+          <SparkleIcon />
+          {t("currentBranch.copyAiPrompt")}
+        </button>
+      </Tooltip>
+      <Tooltip text={t("tooltips.git.merge")} side="bottom">
+        <button className="bb-btn" onClick={props.onUpdateFromMain}>
+          <RefreshIcon />
+          {t("currentBranch.updateBranchFromMain")} ({policy.updateBranchStrategy})
+        </button>
+      </Tooltip>
+      <Tooltip text={t("tooltips.currentBranch.transferChanges")} side="bottom">
+        <button className="bb-btn" onClick={() => props.onCopy(transferCommands, t("currentBranch.transferCopied"))}>
+          {t("currentBranch.copyTransferCommands")}
+        </button>
+      </Tooltip>
+    </div>
+  );
+
+  const changedFilesCard = (
+    <div className="bb-card bb-cb-list-card">
+      <div className="bb-section-head">
+        <span className="bb-section-title">{t("currentBranch.changedFiles")}</span>
+        <HelpIcon text={t("tooltips.currentBranch.changedFiles")} />
+        {changedFiles.length > 0 && <span className="bb-count">{changedFiles.length}</span>}
+      </div>
+      {changedFiles.length === 0 ? (
+        <div className="bb-muted small">{t("currentBranch.noChangedFiles")}</div>
+      ) : (
+        <ul className="bb-files-filelist bb-cb-scroll-list">
+          {changedFiles.map((f) => (
+            <li key={f.path} className="bb-file-row">
+              <Badge tone={STATUS_TONE[f.status] ?? "neutral"}>{f.status}</Badge>
+              <span className="bb-file-path" onClick={() => props.onOpenFile(f.path)} title={t("task.files.open")}>
+                {f.path}
+              </span>
+              {branch && (
+                <button className="bb-btn ghost sm" onClick={() => props.onOpenDiff(branch, f.path)}>
+                  {t("task.files.diff")}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
+  const commitsCard = (
+    <div className="bb-card bb-cb-list-card">
+      <div className="bb-section-head">
+        <span className="bb-section-title">{t("currentBranch.commits")}</span>
+        {commits.length > 0 && <span className="bb-count">{commits.length}</span>}
+      </div>
+      {commits.length === 0 ? (
+        <div className="bb-muted small">{t("currentBranch.noCommits")}</div>
+      ) : (
+        <ul className="bb-commit-list bb-cb-scroll-list">
+          {commits.map((c) => (
+            <li key={c.hash} className="bb-commit-row">
+              <code className="bb-commit-hash" title={t("task.files.open")} onClick={() => props.onCopy(c.hash, c.shortHash)}>
+                {c.shortHash}
+              </code>
+              <span className="bb-commit-subject">{c.subject}</span>
+              <span className="bb-commit-meta">{c.author} · {formatDate(c.date)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
   return (
     <div className="bb-page">
       {header}
-      <div className="bb-page-body bb-cb">
-        {/* Branch status header */}
-        <div className="bb-card bb-context">
-          <div className="bb-cb-head">
-            <code className="bb-cb-branch">⎇ {branch}</code>
-            <HelpIcon text={t("tooltips.currentBranch.main")} />
-            {row && (
-              <Tooltip text={t("tooltips.currentBranch.aheadBehind")}>
-                <span className="bb-cb-ab">↑{row.info.commitsAheadMain} ↓{row.info.commitsBehindMain}</span>
-              </Tooltip>
-            )}
-            {row && (row.riskLevel === "high" || row.riskLevel === "critical") && (
-              <Badge tone={row.riskLevel === "critical" ? "critical" : "high"}>
-                {t(`branchMap.risk${row.riskLevel === "critical" ? "Critical" : "High"}`)}
-              </Badge>
-            )}
-            {row?.info.deployedToDev && <Badge tone="info">DEV</Badge>}
+      <div className="bb-page-body bb-cb bb-cb-page">
+        <section className="bb-cb-hero">
+          <div className="bb-cb-hero-main">
+            <div className="bb-cb-branch-block">
+              <div className="bb-section-head">
+                <span className="bb-section-title">{t("currentBranch.branchLabel")}</span>
+                <HelpIcon text={t("tooltips.currentBranch.main")} />
+              </div>
+              <button
+                className="bb-cb-branch-chip"
+                disabled={!branch}
+                title={branchTitle}
+                onClick={() => branch && props.onCopy(branch, t("toast.branchNameCopied"))}
+              >
+                <BranchIcon size={14} />
+                <code>{branchTitle}</code>
+              </button>
+            </div>
+            {statusPills}
           </div>
-          {git.hasUncommittedChanges && <div className="bb-callout warn">{t("currentBranch.dirtyTreeWarning")}</div>}
-          {row && !row.info.existsRemote && (
-            <div className="bb-callout info">{t("currentBranch.branchNotPushed")}</div>
-          )}
-          <div className="bb-cb-step">
-            <strong>{t("currentBranch.nextStep")}:</strong> {t(stepKey)}
+          <div className="bb-cb-next-row">
+            <div className="bb-cb-next-card">
+              <span className="bb-cb-next-label">{t("currentBranch.nextStep")}</span>
+              <span className="bb-cb-next-text">{t(stepKey)}</span>
+            </div>
+            {actionBar}
           </div>
-        </div>
+        </section>
 
-        {/* No task → empty state */}
         {!task && (
-          <div className="bb-card">
-            <div className="bb-cb-state-title">{t("currentBranch.noTaskTitle")}</div>
-            <div className="bb-muted">{t("currentBranch.noTaskDescription")}</div>
-            <div className="bb-git-actions">
+          <div className="bb-cb-empty-grid">
+            <div className="bb-card bb-cb-empty-card">
+              <div>
+                <div className="bb-cb-state-title">{t("currentBranch.noTaskTitle")}</div>
+                <div className="bb-muted">{t("currentBranch.noTaskDescription")}</div>
+              </div>
               <button
                 className="bb-btn accent"
                 onClick={() =>
@@ -205,185 +346,189 @@ export function CurrentBranchPage(props: Props) {
               >
                 {t("currentBranch.createTaskFromBranch")}
               </button>
+              <div className="bb-cb-link-row">
+                <select className="bb-input" value={linkTaskId} onChange={(e) => setLinkTaskId(e.target.value)}>
+                  <option value="">{t("currentBranch.linkPick")}</option>
+                  {board.tasks
+                    .filter((x) => !x.branchName)
+                    .map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.title}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  className="bb-btn"
+                  disabled={!linkTaskId || !branch}
+                  onClick={() => branch && props.onLinkBranch(linkTaskId, branch)}
+                >
+                  {t("currentBranch.linkBranchToTask")}
+                </button>
+              </div>
             </div>
-            <div className="bb-comment-add">
-              <select className="bb-input" value={linkTaskId} onChange={(e) => setLinkTaskId(e.target.value)}>
-                <option value="">{t("currentBranch.linkPick")}</option>
-                {board.tasks
-                  .filter((x) => !x.branchName)
-                  .map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.title}
-                    </option>
-                  ))}
-              </select>
-              <button
-                className="bb-btn"
-                disabled={!linkTaskId || !branch}
-                onClick={() => branch && props.onLinkBranch(linkTaskId, branch)}
-              >
-                {t("currentBranch.linkBranchToTask")}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Has task → history + summary + flow + checklist + comments */}
-        {task && (
-          <WorkLog task={task} events={props.events} branchCommits={commits} users={board.users} />
-        )}
-        {task && (
-          <div className="bb-card">
-            <div className="bb-cb-head">
-              <span className="bb-cb-tasktitle">{task.title}</span>
-              {task.ai?.createdByAi && <Badge tone="info">AI</Badge>}
-              <button className="bb-btn ghost sm" onClick={() => props.onOpenTask(task.id)}>
-                {t("currentBranch.openTask")}
-              </button>
-            </div>
-            {task.description && <div className="bb-muted">{task.description}</div>}
-            <div className="bb-cb-meta">
-              <span>{t("task.status")}: <strong>{colName || task.status}</strong></span>
-              <span>{t("task.created")}: {formatDate(task.createdAt)}</span>
-              <span>{t("task.updated")}: {relativeTime(task.updatedAt, timeLabels())}</span>
-            </div>
-
-            {/* Task flow pipeline */}
-            <div className="bb-section-head" style={{ marginTop: 8 }}>
-              <span className="bb-section-title">{t("currentBranch.taskFlow")}</span>
-              <HelpIcon text={t("tooltips.currentBranch.taskFlow")} />
-            </div>
-            <div className="bb-flow-stages">
-              {[...board.columns]
-                .sort((a, b) => a.position - b.position)
-                .map((c) => {
-                  const isCurrent = c.id === task.columnId;
-                  const done = bucketOf(c.name) === "done";
-                  return (
-                    <button
-                      key={c.id}
-                      className={`bb-flow-stage ${isCurrent ? "current" : ""}`}
-                      onClick={() => {
-                        if (isCurrent) return;
-                        if (done) props.onFinish(task.id);
-                        else props.onMoveTask(task.id, c.id);
-                      }}
-                    >
-                      {c.name}
-                    </button>
-                  );
-                })}
-            </div>
+            <aside className="bb-cb-side">
+              <div className="bb-card bb-cb-safety-card">
+                <div className="bb-section-head">
+                  <span className="bb-section-title">{t("currentBranch.branchHealth")}</span>
+                </div>
+                <div className="bb-cb-safety-list">
+                  <div className="bb-cb-safety-item">
+                    <span>{t("currentBranch.safety.workingTree")}</span>
+                    <Badge tone={git.hasUncommittedChanges ? "warning" : "success"}>
+                      {git.hasUncommittedChanges ? t("currentBranch.safety.dirtyTree") : t("currentBranch.safety.cleanTree")}
+                    </Badge>
+                  </div>
+                  <div className="bb-cb-safety-item">
+                    <span>{t("currentBranch.safety.remote")}</span>
+                    <Badge tone={hasRemote ? "success" : "warning"}>
+                      {hasRemote ? t("currentBranch.safety.remoteSynced") : t("currentBranch.safety.remoteMissing")}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+              {changedFilesCard}
+              {commitsCard}
+            </aside>
           </div>
         )}
 
         {task && (
-          <Checklist items={task.checklist ?? []} onChange={(items) => props.onSaveChecklist(task.id, items)} />
-        )}
-        {task && (
-          <Comments comments={task.comments} users={board.users} onAdd={(text) => props.onAddComment(task.id, text)} />
-        )}
-
-        {/* Actions */}
-        <div className="bb-card">
-          <div className="bb-section-head">
-            <span className="bb-section-title">{t("currentBranch.actions")}</span>
-          </div>
-          <div className="bb-git-actions">
-            <Tooltip text={t("tooltips.git.push")}>
-              <button className="bb-btn" disabled={!branch} onClick={() => branch && props.onPush(branch)}>
-                {t("currentBranch.pushBranch")}
-              </button>
-            </Tooltip>
-            <Tooltip text={t("tooltips.deploy.dev")}>
-              <button
-                className="bb-btn"
-                disabled={!task || !props.appConfig.policy.devDeployCommand}
-                onClick={() => task && props.onDeployDev(task.id)}
-              >
-                {t("currentBranch.deployToDev")}
-              </button>
-            </Tooltip>
-            <button className="bb-btn" disabled={!branch} onClick={() => branch && props.onCopy(branch, t("toast.branchNameCopied"))}>
-              {t("currentBranch.copyBranchName")}
-            </button>
-            <Tooltip text={t("tooltips.ai.copyPrompt")}>
-              <button className="bb-btn" disabled={!task} onClick={() => task && props.onCopyAiPrompt(task.id)}>
-                {t("currentBranch.copyAiPrompt")}
-              </button>
-            </Tooltip>
-            <Tooltip text={t("tooltips.git.merge")}>
-              <button className="bb-btn" onClick={props.onUpdateFromMain}>
-                {t("currentBranch.updateBranchFromMain")} ({props.appConfig.policy.updateBranchStrategy})
-              </button>
-            </Tooltip>
-            <Tooltip text={t("tooltips.currentBranch.transferChanges")}>
-              <button className="bb-btn" onClick={() => props.onCopy(transferCommands, t("currentBranch.transferCopied"))}>
-                {t("currentBranch.copyTransferCommands")}
-              </button>
-            </Tooltip>
-            {task && (
-              <button className="bb-btn accent full" disabled={!branch} onClick={() => props.onFinish(task.id)} title={t("task.finishHint")}>
-                {t("currentBranch.finishTask")}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Changed files */}
-        <div className="bb-card">
-          <div className="bb-section-head">
-            <span className="bb-section-title">{t("currentBranch.changedFiles")}</span>
-            <HelpIcon text={t("tooltips.currentBranch.changedFiles")} />
-            {changedFiles.length > 0 && <span className="bb-count">{changedFiles.length}</span>}
-          </div>
-          {changedFiles.length === 0 ? (
-            <div className="bb-muted small">{t("currentBranch.noChangedFiles")}</div>
-          ) : (
-            <ul className="bb-files-filelist">
-              {changedFiles.map((f) => (
-                <li key={f.path} className="bb-file-row">
-                  <span className={`bb-badge ${STATUS_TONE[f.status] ?? "tone-neutral"}`}>{f.status}</span>
-                  <span className="bb-file-path" onClick={() => props.onOpenFile(f.path)} title={t("task.files.open")}>
-                    {f.path}
-                  </span>
-                  {branch && (
-                    <button className="bb-btn ghost sm" onClick={() => props.onOpenDiff(branch, f.path)}>
-                      {t("task.files.diff")}
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* Commits */}
-        <div className="bb-card">
-          <div className="bb-section-head">
-            <span className="bb-section-title">{t("currentBranch.commits")}</span>
-            {commits.length > 0 && <span className="bb-count">{commits.length}</span>}
-          </div>
-          {commits.length === 0 ? (
-            <div className="bb-muted small">{t("currentBranch.noCommits")}</div>
-          ) : (
-            <ul className="bb-commit-list">
-              {commits.map((c) => (
-                <li key={c.hash} className="bb-commit-row">
-                  <code
-                    className="bb-commit-hash"
-                    title={t("task.files.open")}
-                    onClick={() => props.onCopy(c.hash, c.shortHash)}
+          <div className="bb-cb-layout">
+            <main className="bb-cb-main">
+              <section className="bb-card bb-cb-task-panel">
+                <div className="bb-cb-task-top">
+                  <button
+                    className={`bb-check ${task.status === "done" ? "checked" : ""}`}
+                    onClick={() => props.onFinish(task.id)}
+                    title={t("currentBranch.finishTask")}
                   >
-                    {c.shortHash}
-                  </code>
-                  <span className="bb-commit-subject">{c.subject}</span>
-                  <span className="bb-commit-meta">{c.author} · {formatDate(c.date)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                    {task.status === "done" ? "✓" : ""}
+                  </button>
+                  <div className="bb-cb-task-copy">
+                    <div className="bb-cb-task-kicker">
+                      <span>{t("currentBranch.taskLinked")}</span>
+                      {task.ai?.createdByAi && <Badge tone="info">AI</Badge>}
+                      {assignee && (
+                        <span className="bb-avatar small" style={{ background: assignee.color }} title={assignee.name}>
+                          {assignee.avatarText}
+                        </span>
+                      )}
+                    </div>
+                    <h2 className="bb-cb-task-title">{task.title}</h2>
+                    {task.description && <p className="bb-cb-task-desc">{task.description}</p>}
+                  </div>
+                  <button className="bb-btn ghost sm" onClick={() => props.onOpenTask(task.id)}>
+                    {t("currentBranch.openTask")}
+                  </button>
+                </div>
+
+                <div className="bb-cb-meta-grid">
+                  <div className="bb-cb-meta-tile">
+                    <span>{t("currentBranch.currentStatus")}</span>
+                    <strong>{colName || task.status}</strong>
+                  </div>
+                  <div className="bb-cb-meta-tile">
+                    <span>{t("currentBranch.updatedShort")}</span>
+                    <strong>{relativeTime(task.updatedAt, timeLabels())}</strong>
+                  </div>
+                  <div className="bb-cb-meta-tile">
+                    <span>{t("task.checklist")}</span>
+                    <strong>{checklistDone}/{checklistTotal}</strong>
+                  </div>
+                  <div className="bb-cb-meta-tile">
+                    <span>{t("task.comments")}</span>
+                    <strong>{task.comments.length}</strong>
+                  </div>
+                </div>
+
+                <div className="bb-section-head">
+                  <span className="bb-section-title">{t("currentBranch.taskFlow")}</span>
+                  <HelpIcon text={t("tooltips.currentBranch.taskFlow")} />
+                </div>
+                <div className="bb-flow-stages">
+                  {sortedColumns.map((c) => {
+                    const isCurrent = c.id === task.columnId;
+                    const done = bucketOf(c.name) === "done";
+                    return (
+                      <button
+                        key={c.id}
+                        className={`bb-flow-stage ${isCurrent ? "current" : ""}`}
+                        onClick={() => {
+                          if (isCurrent) return;
+                          if (done) props.onFinish(task.id);
+                          else props.onMoveTask(task.id, c.id);
+                        }}
+                      >
+                        {c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="bb-card bb-cb-collab-card">
+                <div className="bb-section-head">
+                  <span className="bb-section-title">{t("currentBranch.checklistAndDiscussion")}</span>
+                </div>
+                <div className="bb-cb-collab-grid">
+                  <Checklist items={task.checklist ?? []} onChange={(items) => props.onSaveChecklist(task.id, items)} />
+                  <Comments
+                    comments={task.comments}
+                    users={board.users}
+                    currentUserId={currentUserId}
+                    onAdd={(text) => props.onAddComment(task.id, text)}
+                  />
+                </div>
+              </section>
+
+              <WorkLog task={task} events={props.events} branchCommits={commits} users={board.users} />
+            </main>
+
+            <aside className="bb-cb-side">
+              <div className="bb-card bb-cb-safety-card">
+                <div className="bb-section-head">
+                  <span className="bb-section-title">{t("currentBranch.branchHealth")}</span>
+                </div>
+                {git.hasUncommittedChanges && <div className="bb-callout warn">{t("currentBranch.dirtyTreeWarning")}</div>}
+                {row && !row.info.existsRemote && <div className="bb-callout info">{t("currentBranch.branchNotPushed")}</div>}
+                <div className="bb-cb-safety-list">
+                  <div className="bb-cb-safety-item">
+                    <span>{t("currentBranch.safety.workingTree")}</span>
+                    <Badge tone={git.hasUncommittedChanges ? "warning" : "success"}>
+                      {git.hasUncommittedChanges ? t("currentBranch.safety.dirtyTree") : t("currentBranch.safety.cleanTree")}
+                    </Badge>
+                  </div>
+                  <div className="bb-cb-safety-item">
+                    <span>{t("currentBranch.safety.remote")}</span>
+                    <Badge tone={hasRemote ? "success" : "warning"}>
+                      {hasRemote ? t("currentBranch.safety.remoteSynced") : t("currentBranch.safety.remoteMissing")}
+                    </Badge>
+                  </div>
+                  <div className="bb-cb-safety-item">
+                    <span>{t("currentBranch.safety.mergePolicy")}</span>
+                    <Badge tone={policy.allowDirectMergeToMain ? "warning" : "success"}>
+                      {policy.allowDirectMergeToMain ? t("currentBranch.safety.mergeAllowed") : t("currentBranch.safety.mergeDisabled")}
+                    </Badge>
+                  </div>
+                  <div className="bb-cb-safety-item">
+                    <span>{t("currentBranch.safety.cleanBeforeFinish")}</span>
+                    <Badge tone={policy.requireCleanWorkingTreeBeforeFinish ? "success" : "warning"}>
+                      {policy.requireCleanWorkingTreeBeforeFinish ? t("currentBranch.safety.required") : t("currentBranch.safety.notRequired")}
+                    </Badge>
+                  </div>
+                  <div className="bb-cb-safety-item">
+                    <span>{t("currentBranch.safety.preFinishCommand")}</span>
+                    <Badge tone={policy.runCommandBeforeFinish ? "info" : "neutral"}>
+                      {policy.runCommandBeforeFinish ? t("currentBranch.safety.configured") : t("currentBranch.safety.notConfigured")}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+              {changedFilesCard}
+              {commitsCard}
+            </aside>
+          </div>
+        )}
       </div>
     </div>
   );

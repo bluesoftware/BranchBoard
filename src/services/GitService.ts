@@ -488,13 +488,89 @@ export class GitService {
    * Commits unique to a branch vs main (main..branch). Falls back to the
    * branch's own log when main is unavailable. Read-only, no network.
    */
+  /** Resolve the SHA a branch ref points at (local first, then origin/<name>). */
+  private async branchTip(branchName: string): Promise<string | null> {
+    const remote = this.getConfig().remoteName || "origin";
+    for (const ref of [branchName, `${remote}/${branchName}`]) {
+      try {
+        const { stdout } = await this.run(["rev-parse", "--verify", ref]);
+        const sha = stdout.trim();
+        if (sha) {
+          return sha;
+        }
+      } catch {
+        /* try next */
+      }
+    }
+    return null;
+  }
+
+  /** Find the merge commit on main that brought `branchTip` in (its 2nd parent). */
+  private async findMergeCommit(branchTip: string, mainBranch: string): Promise<string | null> {
+    try {
+      const { stdout } = await this.run([
+        "log", mainBranch, "--merges", "--format=%H %P", "-n", "800",
+      ]);
+      for (const line of stdout.split("\n")) {
+        const parts = line.trim().split(/\s+/).filter(Boolean);
+        if (parts.length < 2) {
+          continue;
+        }
+        const hash = parts[0];
+        const parents = parts.slice(1);
+        // Prefer the conventional 2nd-parent match, but accept any parent.
+        if (parents[1] === branchTip || parents.includes(branchTip)) {
+          return hash;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
+  /**
+   * Work out how to show a branch's CONTRIBUTION, even after it was merged.
+   *  - ahead of main      -> main..branch / main...branch  (live work)
+   *  - already merged in  -> M^1..M^2 / M^1...M^2 from the merge commit M
+   * Returns null when there's no main to compare against.
+   */
+  private async contributionRange(
+    branchName: string,
+    mainBranch: string
+  ): Promise<{ logRange: string; diffSpec: string | null } | null> {
+    const mainOk = mainBranch && mainBranch !== branchName && (await this.branchExists(mainBranch));
+    if (!mainOk) {
+      return { logRange: branchName, diffSpec: null };
+    }
+    const tip = await this.branchTip(branchName);
+    if (!tip) {
+      return { logRange: `${mainBranch}..${branchName}`, diffSpec: `${mainBranch}...${branchName}` };
+    }
+    let ahead = 0;
+    try {
+      const { stdout } = await this.run(["rev-list", "--count", `${mainBranch}..${tip}`]);
+      ahead = Number(stdout.trim()) || 0;
+    } catch {
+      /* assume merged */
+    }
+    if (ahead > 0) {
+      return { logRange: `${mainBranch}..${branchName}`, diffSpec: `${mainBranch}...${branchName}` };
+    }
+    // Merged: reconstruct the contribution from the merge commit.
+    const m = await this.findMergeCommit(tip, mainBranch);
+    if (m) {
+      return { logRange: `${m}^1..${m}^2`, diffSpec: `${m}^1...${m}^2` };
+    }
+    // Couldn't find a merge commit (squash/fast-forward): nothing distinct.
+    return { logRange: `${mainBranch}..${branchName}`, diffSpec: `${mainBranch}...${branchName}` };
+  }
+
   async getCommits(branchName: string, mainBranch: string, limit = 80): Promise<
     Array<{ hash: string; shortHash: string; author: string; date: string; subject: string }>
   > {
-    const range =
-      mainBranch && mainBranch !== branchName && (await this.branchExists(mainBranch))
-        ? `${mainBranch}..${branchName}`
-        : branchName;
+    const resolved = await this.contributionRange(branchName, mainBranch);
+    const range = resolved ? resolved.logRange : branchName;
     try {
       const { stdout } = await this.run([
         "log",
@@ -529,10 +605,8 @@ export class GitService {
   async getBranchDiffFiles(branchName: string, mainBranch: string): Promise<
     Array<{ path: string; status: string; additions: number; deletions: number }>
   > {
-    const base =
-      mainBranch && mainBranch !== branchName && (await this.branchExists(mainBranch))
-        ? `${mainBranch}...${branchName}`
-        : null;
+    const resolved = await this.contributionRange(branchName, mainBranch);
+    const base = resolved?.diffSpec ?? null;
     if (!base) {
       return [];
     }
@@ -627,6 +701,51 @@ export class GitService {
     }
   }
 
+  /** Does a branch exist on the remote (origin/<name>)? */
+  async remoteBranchExists(name: string): Promise<boolean> {
+    const remote = this.getConfig().remoteName || "origin";
+    try {
+      await this.run(["rev-parse", "--verify", `${remote}/${name}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Make sure `branchName` is checked out, CREATING it if it doesn't exist:
+   *  - exists locally        -> checkout
+   *  - exists on the remote   -> checkout -b <name> --track origin/<name>
+   *  - doesn't exist anywhere -> checkout -b <name> from current HEAD
+   * This is what lets moving a card act on a branch that was only ever recorded
+   * on the board (e.g. created on another machine) without erroring.
+   */
+  async ensureBranch(branchName: string): Promise<OperationResult> {
+    const action = "ensureBranch";
+    try {
+      await this.assertValidBranchName(branchName);
+      if (await this.branchExists(branchName)) {
+        await this.run(["checkout", branchName]);
+        return { ok: true, action, message: `Switched to '${branchName}'.` };
+      }
+      const remote = this.getConfig().remoteName || "origin";
+      // Fetch quietly so origin/<name> is up to date before we probe it.
+      try {
+        await this.run(["fetch", remote, branchName]);
+      } catch {
+        /* offline or no such remote branch — fall through */
+      }
+      if (await this.remoteBranchExists(branchName)) {
+        await this.run(["checkout", "-b", branchName, "--track", `${remote}/${branchName}`]);
+        return { ok: true, action, message: `Created '${branchName}' tracking ${remote}/${branchName}.` };
+      }
+      await this.run(["checkout", "-b", branchName]);
+      return { ok: true, action, message: `Created new branch '${branchName}' from current HEAD.` };
+    } catch (err: any) {
+      return { ok: false, action, message: `Could not create or switch to '${branchName}'.`, detail: err?.message };
+    }
+  }
+
   async createBranch(branchName: string): Promise<OperationResult> {
     try {
       await this.assertValidBranchName(branchName);
@@ -706,8 +825,12 @@ export class GitService {
 
   /**
    * Merge `branchName` into `target` (e.g. a feature branch into dev) and push.
-   * Checks out target, pulls it, merges --no-ff, pushes, then returns to the
-   * original branch. Aborts cleanly on conflict and never deletes anything.
+   * If `target` doesn't exist yet — locally or on the remote — it is created
+   * from the main branch and pushed immediately, so the first task that
+   * reaches a "staging" column is what brings origin/dev (or whichever
+   * target) into existence. Checks out target, pulls it, merges --no-ff,
+   * pushes, then returns to the original branch. Aborts cleanly on conflict
+   * and never deletes anything.
    */
   async mergeIntoBranch(target: string, branchName: string): Promise<OperationResult> {
     const action = "mergeIntoBranch";
@@ -726,17 +849,50 @@ export class GitService {
 
       const co = await this.checkoutBranch(target);
       if (!co.ok) {
-        // target may not exist locally yet — try to create it from remote.
+        // Target may not exist locally yet. Refresh remote refs, then either
+        // track an existing origin/<target> or create it from scratch.
         try {
-          await this.run(["checkout", "-b", target, `${remote}/${target}`]);
+          await this.run(["fetch", remote, target]);
         } catch {
-          return { ok: false, action, message: `Could not switch to '${target}'.`, detail: co.detail };
+          /* offline or remote has no such branch yet — fall through */
         }
-      }
-      try {
-        await this.run(["pull", remote, target]);
-      } catch {
-        /* target may have no upstream yet — continue with local */
+        if (await this.remoteBranchExists(target)) {
+          try {
+            await this.run(["checkout", "-b", target, "--track", `${remote}/${target}`]);
+          } catch (err: any) {
+            return { ok: false, action, message: `Could not switch to '${target}'.`, detail: err?.message };
+          }
+        } else {
+          // Target doesn't exist anywhere yet — create it from the main
+          // branch and push it immediately so it exists on origin too.
+          try {
+            const main = await this.getMainBranch();
+            await this.run(["checkout", main]);
+            try {
+              await this.run(["pull", remote, main]);
+            } catch {
+              /* main may have no upstream yet — continue with local */
+            }
+            await this.run(["checkout", "-b", target]);
+            await this.run(["push", "-u", remote, target]);
+          } catch (err: any) {
+            if (original) {
+              await this.run(["checkout", original]).catch(() => undefined);
+            }
+            return {
+              ok: false,
+              action,
+              message: `Target branch '${target}' did not exist and could not be created.`,
+              detail: err?.message,
+            };
+          }
+        }
+      } else {
+        try {
+          await this.run(["pull", remote, target]);
+        } catch {
+          /* target may have no upstream yet — continue with local */
+        }
       }
 
       try {
@@ -844,14 +1000,32 @@ export class GitService {
     }
   }
 
+  /** True if `ref` has 2+ parents (i.e. it's a merge commit). */
+  private async isMergeCommit(ref: string): Promise<boolean> {
+    try {
+      const { stdout } = await this.run(["rev-list", "--parents", "-n", "1", ref]);
+      // First token is the commit itself; the rest are its parents.
+      return stdout.trim().split(/\s+/).length > 2;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Revert the last commit on a branch (git revert --no-edit HEAD). This is the
    * SAFE undo: it creates a new commit, it never rewrites history. Assumes the
-   * branch is checked out and the tree is clean.
+   * branch is checked out and the tree is clean. Merge commits are detected
+   * automatically and reverted with `-m 1` (against the first/mainline parent),
+   * since plain `git revert` refuses a merge commit otherwise.
    */
   async revertLastCommit(): Promise<OperationResult> {
     try {
-      const { stdout } = await this.run(["revert", "--no-edit", "HEAD"]);
+      const args = ["revert", "--no-edit"];
+      if (await this.isMergeCommit("HEAD")) {
+        args.push("-m", "1");
+      }
+      args.push("HEAD");
+      const { stdout } = await this.run(args);
       return { ok: true, action: "revertLastCommit", message: "Reverted the last commit.", detail: stdout.trim() };
     } catch (err: any) {
       // Abort a conflicted revert so the tree is left clean.
@@ -867,6 +1041,37 @@ export class GitService {
         detail: err?.message,
       };
     }
+  }
+
+  /**
+   * "Revert from origin": revert the last commit (merge-aware, see above) and,
+   * only if that succeeds, push the result to the remote. This is the flow
+   * for undoing something that was already pushed: the revert is a normal new
+   * commit, and pushing it triggers any GitHub webhook (CI/deploy) exactly the
+   * way a regular push would — so a connected deployment rolls back to the
+   * previous version instead of needing a force-push or history rewrite.
+   * Never touches origin if the local revert failed or conflicted.
+   */
+  async revertFromOrigin(branchName: string): Promise<OperationResult> {
+    const revert = await this.revertLastCommit();
+    if (!revert.ok) {
+      return { ...revert, action: "revertFromOrigin" };
+    }
+    const push = await this.pushBranch(branchName);
+    if (!push.ok) {
+      return {
+        ok: false,
+        action: "revertFromOrigin",
+        message: `Reverted locally, but push to origin failed. Origin still has the old commit — push '${branchName}' manually once you've resolved the issue.`,
+        detail: push.detail,
+      };
+    }
+    return {
+      ok: true,
+      action: "revertFromOrigin",
+      message: `Reverted the last commit and pushed '${branchName}' to origin.`,
+      detail: push.message,
+    };
   }
 
   /** Run a configured pre-finish command (e.g. "npm run build"). */
@@ -934,10 +1139,11 @@ export async function finishTaskGitFlow(
     };
   }
 
-  // 2. Make sure we're on the task branch.
+  // 2. Make sure we're on the task branch, creating it if it doesn't exist
+  //    locally (it may have been recorded on the board from another machine).
   const current = await git.getCurrentBranch();
   if (current !== branch) {
-    const checkout = await git.checkoutBranch(branch);
+    const checkout = await git.ensureBranch(branch);
     if (!checkout.ok) {
       return { ok: false, action: "finishTask", message: checkout.message, detail: checkout.detail };
     }

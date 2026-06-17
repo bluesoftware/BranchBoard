@@ -2,10 +2,10 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { BranchBoardConfig, BoardUser } from "./types";
-import { StorageProvider } from "./services/StorageProvider";
+import { BranchBoardConfig, BoardData, BoardUser } from "./types";
+import { StorageProvider, BOARD_SCHEMA_VERSION } from "./services/StorageProvider";
 import { LocalJsonStorageProvider } from "./services/LocalJsonStorageProvider";
-import { ServerStorageProvider } from "./services/ServerStorageProvider";
+import { ServerStorageProvider, NoServerBoardError } from "./services/ServerStorageProvider";
 import { BoardService } from "./services/BoardService";
 import { GitService } from "./services/GitService";
 import { BoardPanel, BoardViewProvider, ControllerDeps } from "./panel/BoardPanel";
@@ -17,6 +17,7 @@ let gitService: GitService | undefined;
 let storage: StorageProvider | undefined;
 let syncTimer: NodeJS.Timeout | undefined;
 let userTimer: NodeJS.Timeout | undefined;
+let statusBarItem: vscode.StatusBarItem | undefined;
 
 /** Read the effective extension configuration from VS Code settings. */
 function readConfig(): BranchBoardConfig {
@@ -32,6 +33,7 @@ function readConfig(): BranchBoardConfig {
     sshPort: c.get("sshPort", 22),
     sqliteRemotePath: c.get("sqliteRemotePath", "~/sqlite/branchboard.db"),
     sshKeyPath: c.get("sshKeyPath", ""),
+    serverAllowEmptyOverwrite: c.get("serverAllowEmptyOverwrite", false),
     defaultMainBranch: c.get("defaultMainBranch", "main"),
     remoteName: c.get("remoteName", "origin"),
     autoDetectGitUser: c.get("autoDetectGitUser", true),
@@ -89,6 +91,20 @@ function readConfig(): BranchBoardConfig {
       showPriority: c.get("appearance.showPriority", true),
       reduceAnimations: c.get("appearance.reduceAnimations", false),
     },
+    notifications: {
+      enabled: c.get("notifications.enabled", true),
+      showToast: c.get("notifications.showToast", true),
+      notifyTaskCreated: c.get("notifications.notifyTaskCreated", true),
+      notifyCommentAdded: c.get("notifications.notifyCommentAdded", true),
+      notifyAssigned: c.get("notifications.notifyAssigned", true),
+      notifyBranchPushed: c.get("notifications.notifyBranchPushed", true),
+      notifyMergeFinished: c.get("notifications.notifyMergeFinished", true),
+      notifyMergeFailed: c.get("notifications.notifyMergeFailed", true),
+      notifyTaskMovedToReview: c.get("notifications.notifyTaskMovedToReview", true),
+      notifyTaskDone: c.get("notifications.notifyTaskDone", true),
+      soundEnabled: c.get("notifications.soundEnabled", true),
+      soundId: c.get("notifications.soundId", "mail-alert"),
+    },
   };
 }
 
@@ -119,6 +135,7 @@ function buildStorage(config: BranchBoardConfig, root: vscode.Uri): StorageProvi
         projectName: config.projectName,
         boardTitle: config.boardTitle,
         seedUsers: config.availableUsers,
+        allowEmptyOverwrite: config.serverAllowEmptyOverwrite,
       });
     } catch (err: any) {
       vscode.window.showErrorMessage(
@@ -128,6 +145,40 @@ function buildStorage(config: BranchBoardConfig, root: vscode.Uri): StorageProvi
     }
   }
   return buildLocalStorage(config, root);
+}
+
+/** A board held only in memory (never persisted) so the UI can show onboarding. */
+function emptyShellBoard(config: BranchBoardConfig): BoardData {
+  return {
+    version: BOARD_SCHEMA_VERSION,
+    projectName: config.projectName,
+    boardTitle: config.boardTitle,
+    columns: [],
+    users: config.availableUsers ?? [],
+    tasks: [],
+    events: [],
+    deployments: [],
+    notifications: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Server is reachable but has NO board. Put an empty board in memory (NOT
+ * persisted) and prompt the user to create one explicitly. Nothing is written
+ * to the server until they do, so an existing database can never be clobbered.
+ */
+async function applyServerNoBoard(config: BranchBoardConfig) {
+  if (!boardService) {
+    return;
+  }
+  await boardService.initWithBoard(emptyShellBoard(config));
+  const create = t("serverNoBoardCreate");
+  void vscode.window.showInformationMessage(t("serverNoBoardMessage"), create).then((choice) => {
+    if (choice === create) {
+      void vscode.commands.executeCommand("branchBoard.openBoard");
+    }
+  });
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -171,7 +222,11 @@ export async function activate(context: vscode.ExtensionContext) {
     Logger.info(`Board loaded from ${storage.kind} storage.`);
   } catch (err: any) {
     Logger.error(`Initial load failed on ${storage.kind} storage: ${err?.message ?? err}`);
-    if (storage.kind === "server") {
+    if (err instanceof NoServerBoardError) {
+      // Reachable but empty: never auto-seed — render an empty board in memory
+      // and ask the user to create one explicitly.
+      await applyServerNoBoard(config);
+    } else if (storage.kind === "server") {
       // Loud, non-destructive fallback: keep the board usable on local JSON so
       // the panel still opens, but make the degradation obvious and offer
       // one-click ways back onto the server. The same boardService instance is
@@ -204,6 +259,16 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Status bar entry: click to open the board. Placed near the Git status
+  // items (left side, high priority) so it sits next to branch/Git Graph.
+  statusBarItem = vscode.window.createStatusBarItem("branchBoard.status", vscode.StatusBarAlignment.Left, 90);
+  statusBarItem.name = "BranchBoard";
+  statusBarItem.text = "$(project) BranchBoard";
+  statusBarItem.tooltip = "Otwórz BranchBoard";
+  statusBarItem.command = "branchBoard.openBoard";
+  statusBarItem.show();
+  context.subscriptions.push(statusBarItem);
+
   /* ---------------- Commands ---------------- */
 
   context.subscriptions.push(
@@ -234,7 +299,9 @@ export async function activate(context: vscode.ExtensionContext) {
         { placeHolder: "Select a task branch to checkout" }
       );
       if (pick) {
-        const res = await gitService.checkoutBranch(pick.branch);
+        // ensureBranch: the branch may exist only on origin (pushed by a
+        // teammate) — track + checkout it locally instead of failing.
+        const res = await gitService.ensureBranch(pick.branch);
         vscode.window[res.ok ? "showInformationMessage" : "showErrorMessage"](`BranchBoard: ${res.message}`);
       }
     }),
@@ -408,6 +475,15 @@ async function retryServerConnection() {
     Logger.info("Reconnected to server storage; board reloaded from the shared database.");
     vscode.window.showInformationMessage(t("serverReconnected"));
   } catch (err: any) {
+    if (err instanceof NoServerBoardError) {
+      // Connected, but the server has no board yet — keep the server provider
+      // and prompt to create one. Never fall back / never auto-seed.
+      Logger.warn("Reconnected, but the server has no board yet.");
+      storage = candidate;
+      await applyServerNoBoard(cfg);
+      vscode.window.showInformationMessage(t("serverReconnected"));
+      return;
+    }
     Logger.error(`Reconnect failed: ${err?.message ?? err}`);
     candidate.dispose();
     storage = buildLocalStorage(cfg, root.uri);
@@ -470,9 +546,15 @@ async function syncNow() {
     return;
   }
   try {
-    const fresh = await storage.load();
-    await boardService.replaceBoard(fresh);
+    // Refresh in memory only — never write back during a poll.
+    await boardService.refreshFromStorage();
   } catch (err: any) {
+    // Server reachable but empty: prompt to create (once), don't spam errors.
+    if (err instanceof NoServerBoardError) {
+      Logger.warn("Sync: server has no board yet.");
+      return;
+    }
+    Logger.error(`Sync failed: ${err?.message ?? err}`);
     vscode.window.showErrorMessage(`BranchBoard: sync failed — ${err?.message ?? err}`);
   }
 }
@@ -498,6 +580,7 @@ export function deactivate() {
   if (userTimer) {
     clearInterval(userTimer);
   }
+  statusBarItem?.dispose();
   boardService?.dispose();
   storage?.dispose();
   Logger.dispose();
