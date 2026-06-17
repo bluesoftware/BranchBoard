@@ -67,6 +67,7 @@ export interface BoardTask {
   columnId: string;
   position: number;
   assignedUserId: string | null;
+  createdByUserId?: string | null;
   branchName: string;
   priority: TaskPriority;
   taskType?: TaskType;

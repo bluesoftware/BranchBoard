@@ -5,6 +5,7 @@ import * as fs from "fs";
 import {
   AppConfig,
   BoardData,
+  BoardTask,
   BranchBoardConfig,
   GitInfo,
   InboundMessage,
@@ -1301,14 +1302,16 @@ export class WebviewController {
         }
 
         case "addComment": {
-          await board.addComment(msg.payload.taskId, msg.payload.authorId, msg.payload.text);
+          const actorUserId = msg.payload.authorId ?? this.currentUserId ?? null;
+          await board.addComment(msg.payload.taskId, actorUserId, msg.payload.text);
           const commentedTask = board.getBoard().tasks.find((tt) => tt.id === msg.payload.taskId);
           if (commentedTask) {
             await this.notify("comment_added", {
               title: t("notifCommentAddedTitle"),
               message: t("notifCommentAddedBody").replace("{title}", commentedTask.title),
               taskId: commentedTask.id,
-              actorUserId: msg.payload.authorId,
+              actorUserId,
+              recipientUserIds: this.chatNotificationRecipients(commentedTask, actorUserId),
             });
           }
           break;
@@ -1621,6 +1624,36 @@ export class WebviewController {
     return Array.from(
       new Set([this.currentUserId, task?.assignedUserId].filter((id): id is string => !!id))
     );
+  }
+
+  private taskCreatorUserId(task: BoardTask): string | null {
+    if (task.createdByUserId) {
+      return task.createdByUserId;
+    }
+    const created = this.deps.board
+      .getBoard()
+      .events.find((event) => event.type === "task_created" && event.taskId === task.id && event.userId);
+    return created?.userId ?? null;
+  }
+
+  private chatNotificationRecipients(task: BoardTask, actorUserId: string | null): string[] {
+    const knownUsers = new Set(this.deps.board.getBoard().users.map((user) => user.id));
+    const recipients = new Set<string>();
+    const add = (userId?: string | null) => {
+      if (userId && knownUsers.has(userId)) {
+        recipients.add(userId);
+      }
+    };
+
+    add(this.taskCreatorUserId(task));
+    add(task.assignedUserId);
+    for (const comment of task.comments) {
+      add(comment.authorId);
+    }
+    if (actorUserId) {
+      recipients.delete(actorUserId);
+    }
+    return Array.from(recipients);
   }
 
   /**

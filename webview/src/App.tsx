@@ -25,6 +25,7 @@ import { BranchMapPage } from "./pages/BranchMapPage";
 import { CurrentBranchPage } from "./pages/CurrentBranchPage";
 import { TodayTasksPage } from "./pages/TodayTasksPage";
 import { buildAiPrompt } from "./utils";
+import { richTextToPlainText } from "./richText";
 
 type Page = "board" | "today" | "currentBranch" | "command" | "branchMap";
 
@@ -299,7 +300,7 @@ export function App() {
       const assignee = board?.users.find((u) => u.id === task.assignedUserId)?.name ?? "";
       const haystack = [
         task.title,
-        task.description,
+        richTextToPlainText(task.description),
         task.branchName,
         assignee,
         ...task.comments.map((c) => c.text),

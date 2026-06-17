@@ -133,11 +133,17 @@ export class LocalJsonStorageProvider implements StorageProvider {
       recipientUserIds: Array.isArray(n.recipientUserIds) ? n.recipientUserIds : [],
       readBy: Array.isArray(n.readBy) ? n.readBy : [],
     }));
+    const createdByTaskId = new Map(
+      board.events
+        .filter((e) => e.type === "task_created" && e.taskId && e.userId)
+        .map((e) => [e.taskId as string, e.userId as string])
+    );
     board.tasks = (board.tasks ?? []).map((t) => ({
       ...t,
       comments: t.comments ?? [],
       checklist: t.checklist ?? [],
       assignedUserId: t.assignedUserId ?? null,
+      createdByUserId: t.createdByUserId ?? createdByTaskId.get(t.id) ?? null,
       branchName: t.branchName ?? "",
       priority: t.priority ?? "none",
       status: t.status ?? "open",

@@ -121,6 +121,8 @@ export interface BoardTask {
   columnId: string;
   position: number;
   assignedUserId: string | null;
+  /** User who created the task. Optional for boards created before this field existed. */
+  createdByUserId?: string | null;
   branchName: string;
   priority: TaskPriority;
   /** Type of work; determines the branch prefix. Defaults to "feature". */

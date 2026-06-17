@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   AppConfig,
   BoardData,
@@ -20,6 +21,7 @@ import { CopyIcon, FileIcon, SparkleIcon } from "./Icons";
 import { WorkLog } from "./task/WorkLog";
 import { Checklist } from "./task/Checklist";
 import { Comments } from "./task/Comments";
+import { RichDescription } from "./task/RichDescription";
 
 interface Props {
   task: BoardTask;
@@ -83,12 +85,76 @@ const PRIORITIES: TaskPriority[] = ["none", "low", "medium", "high", "urgent"];
  * suppress) so the tooltip reliably appears on hover and keyboard focus.
  */
 function Help({ text }: { text: string }) {
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const popRef = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  const updatePosition = () => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return;
+    }
+    const margin = 12;
+    const gap = 8;
+    const width = popRef.current?.offsetWidth ?? 320;
+    const height = popRef.current?.offsetHeight ?? 44;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const left = Math.min(Math.max(rect.left, margin), maxLeft);
+    const preferredTop = rect.bottom + gap;
+    const flippedTop = rect.top - height - gap;
+    const top =
+      preferredTop + height + margin <= window.innerHeight
+        ? preferredTop
+        : Math.max(margin, flippedTop);
+    setPosition({ top, left });
+  };
+
+  const show = () => {
+    updatePosition();
+    setOpen(true);
+  };
+
+  const hide = () => setOpen(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onMove = () => updatePosition();
+    window.addEventListener("resize", onMove);
+    window.addEventListener("scroll", onMove, true);
+    return () => {
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (open) {
+      updatePosition();
+    }
+  }, [open, text]);
+
   return (
-    <span className="bb-help" tabIndex={0} aria-label={text}>
+    <span
+      ref={anchorRef}
+      className="bb-help"
+      tabIndex={0}
+      aria-label={text}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+    >
       ?
-      <span className="bb-help-pop" role="tooltip">
-        {text}
-      </span>
+      {open &&
+        createPortal(
+          <span ref={popRef} className="bb-help-pop bb-help-pop-floating" role="tooltip" style={position}>
+            {text}
+          </span>,
+          document.body
+        )}
     </span>
   );
 }
@@ -163,9 +229,9 @@ function TaskSection({
 export function TaskDrawer(props: Props) {
   const { task, board, git, appConfig } = props;
   const [title, setTitle] = useState(task.title);
-  const [description, setDescription] = useState(task.description);
   const [branchName, setBranchName] = useState(task.branchName);
   const [fileInput, setFileInput] = useState("");
+  const titleRef = useRef<HTMLTextAreaElement>(null);
 
   const attachedFiles = task.attachedFiles ?? [];
   // Debounced file search so typing stays smooth and the suggestion list
@@ -192,9 +258,17 @@ export function TaskDrawer(props: Props) {
 
   useEffect(() => {
     setTitle(task.title);
-    setDescription(task.description);
     setBranchName(task.branchName);
-  }, [task.id, task.title, task.description, task.branchName]);
+  }, [task.id, task.title, task.branchName]);
+
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [title]);
 
   const checklist = task.checklist ?? [];
 
@@ -329,6 +403,7 @@ export function TaskDrawer(props: Props) {
               </button>
               <div className="bb-task-title-stack">
                 <textarea
+                  ref={titleRef}
                   className="bb-task-modal-title"
                   rows={1}
                   value={title}
@@ -336,20 +411,22 @@ export function TaskDrawer(props: Props) {
                   onChange={(e) => setTitle(e.target.value)}
                   onBlur={saveTitle}
                 />
-                <textarea
-                  className="bb-task-description-inline"
-                  rows={3}
-                  value={description}
+                <RichDescription
+                  value={task.description}
                   placeholder={t("task.descriptionPlaceholder")}
-                  title={t("task.help.description")}
-                  onChange={(e) => setDescription(e.target.value)}
-                  onBlur={() => description !== task.description && saveField({ description })}
+                  onSave={(description) => saveField({ description })}
                 />
               </div>
             </section>
             <div className="bb-task-workspace">
               <Checklist titleLabel="Pod-zadania" items={checklist} onChange={saveChecklist} />
-              <Comments comments={task.comments} users={board.users} currentUserId={props.currentUserId} onAdd={props.onAddComment} />
+              <Comments
+                comments={task.comments}
+                users={board.users}
+                task={task}
+                currentUserId={props.currentUserId}
+                onAdd={props.onAddComment}
+              />
 
               <section className="bb-section bb-task-files-inline">
                 <div className="bb-section-title">

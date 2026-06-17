@@ -1,6 +1,7 @@
 import { AppConfig, BoardTask, BoardUser, GitInfo, TaskPriority } from "../types";
 import { t } from "../i18n";
 import { daysOverdue } from "../utils";
+import { richTextToPlainText } from "../richText";
 import { BranchIcon, CalendarIcon, CommentIcon, FileIcon, SparkleIcon } from "./Icons";
 
 interface Props {
@@ -46,6 +47,7 @@ export function TaskCard({
   const isAi = !!task.ai?.createdByAi;
   const attachedCount = task.attachedFiles?.length ?? 0;
   const overdue = isDone ? null : daysOverdue(task.dueDate);
+  const descriptionPreview = richTextToPlainText(task.description);
 
   // Compact due chip shown in the card flags: red overdue, amber today/soon,
   // muted date otherwise.
@@ -116,7 +118,7 @@ export function TaskCard({
               </span>
             )}
           </div>
-          {task.description && <div className="bb-task-card-desc">{task.description}</div>}
+          {descriptionPreview && <div className="bb-task-card-desc">{descriptionPreview}</div>}
         </div>
       </div>
 

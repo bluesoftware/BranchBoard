@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AppConfig, BoardData, BoardEvent, BranchDetail, BranchFlowRow, ChecklistItem, DashboardData, GitInfo } from "../types";
 import { t } from "../i18n";
 import { formatDate, relativeTime } from "../utils";
+import { richTextToPlainText } from "../richText";
 import { AppView } from "../components/navigation/MainNav";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Badge, BadgeTone } from "../components/common/Badge";
@@ -168,6 +169,7 @@ export function CurrentBranchPage(props: Props) {
   const policy = props.appConfig.policy;
   const sortedColumns = [...board.columns].sort((a, b) => a.position - b.position);
   const assignee = task ? board.users.find((u) => u.id === task.assignedUserId) ?? null : null;
+  const descriptionPreview = task ? richTextToPlainText(task.description) : "";
   const checklistDone = task?.checklist?.filter((item) => item.done).length ?? 0;
   const checklistTotal = task?.checklist?.length ?? 0;
   const hasRemote = row?.info.existsRemote ?? false;
@@ -415,7 +417,7 @@ export function CurrentBranchPage(props: Props) {
                       )}
                     </div>
                     <h2 className="bb-cb-task-title">{task.title}</h2>
-                    {task.description && <p className="bb-cb-task-desc">{task.description}</p>}
+                    {descriptionPreview && <p className="bb-cb-task-desc">{descriptionPreview}</p>}
                   </div>
                   <button className="bb-btn ghost sm" onClick={() => props.onOpenTask(task.id)}>
                     {t("currentBranch.openTask")}
@@ -475,6 +477,7 @@ export function CurrentBranchPage(props: Props) {
                   <Comments
                     comments={task.comments}
                     users={board.users}
+                    task={task}
                     currentUserId={currentUserId}
                     onAdd={(text) => props.onAddComment(task.id, text)}
                   />

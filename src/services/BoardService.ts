@@ -196,9 +196,18 @@ export class BoardService {
         this.emitNotification(`You were assigned "${task.title}"`);
       }
 
-      // New comment on my task.
-      if (before && task.assignedUserId === currentUserId && task.comments.length > before.comments.length) {
-        this.emitNotification(`New comment on your task "${task.title}"`);
+      // New chat message in a conversation I participate in.
+      if (before && task.comments.length > before.comments.length) {
+        const newComments = task.comments.slice(before.comments.length);
+        const participates =
+          task.createdByUserId === currentUserId ||
+          task.assignedUserId === currentUserId ||
+          before.comments.some((comment) => comment.authorId === currentUserId) ||
+          task.comments.some((comment) => comment.authorId === currentUserId);
+        const fromSomeoneElse = newComments.some((comment) => comment.authorId !== currentUserId);
+        if (participates && fromSomeoneElse) {
+          this.emitNotification(`New chat message on "${task.title}"`);
+        }
       }
     }
   }
@@ -355,6 +364,7 @@ export class BoardService {
       columnId,
       position: input.position ?? this.nextPosition(columnId),
       assignedUserId: input.assignedUserId ?? null,
+      createdByUserId: input.createdByUserId ?? this.currentUserId ?? input.assignedUserId ?? null,
       branchName: input.branchName ?? "",
       priority: input.priority ?? "none",
       taskType: input.taskType ?? "feature",
@@ -458,15 +468,16 @@ export class BoardService {
     await this.persist();
   }
 
-  async addComment(taskId: string, authorId: string, text: string): Promise<void> {
+  async addComment(taskId: string, authorId: string | null | undefined, text: string): Promise<void> {
     const board = this.getBoard();
     const task = board.tasks.find((t) => t.id === taskId);
     if (!task) {
       return;
     }
+    const resolvedAuthorId = authorId || this.currentUserId || "";
     const comment: TaskComment = {
       id: `c_${Date.now().toString(36)}`,
-      authorId,
+      authorId: resolvedAuthorId,
       text: text.trim(),
       createdAt: this.now(),
     };
@@ -474,7 +485,7 @@ export class BoardService {
     task.updatedAt = this.now();
     this.record("comment_added", {
       taskId: task.id,
-      userId: authorId || null,
+      userId: resolvedAuthorId || null,
       payload: { title: task.title },
     });
     await this.persist();

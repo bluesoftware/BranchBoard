@@ -1162,9 +1162,9 @@ select.bb-input {
 .bb-task-modal-title {
   width: 100%;
   min-height: 38px;
-  max-height: 112px;
   padding: 0 2px;
-  resize: vertical;
+  overflow: hidden;
+  resize: none;
   border: 1px solid transparent;
   border-radius: 7px;
   outline: none;
@@ -1180,27 +1180,209 @@ select.bb-input {
   background: rgba(255, 255, 255, 0.045);
   border-color: rgba(255, 255, 255, 0.18);
 }
-.bb-task-description-inline {
+.bb-rich-description-view {
   width: 100%;
-  min-height: 74px;
-  padding: 3px 2px;
-  resize: vertical;
-  border: 1px solid transparent;
+  min-height: 28px;
+  padding: 1px 2px 4px;
   border-radius: 7px;
-  outline: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.76);
-  font-family: inherit;
-  font-size: 15px;
-  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.86);
+  cursor: text;
+  font-size: 16px;
+  line-height: 1.58;
 }
-.bb-task-description-inline::placeholder {
+.bb-rich-description-view:hover {
+  background: rgba(255, 255, 255, 0.028);
+}
+.bb-rich-description-view.empty {
   color: rgba(255, 255, 255, 0.35);
 }
-.bb-task-description-inline:focus {
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.045);
-  border-color: rgba(255, 255, 255, 0.15);
+.bb-rich-description-content > *:first-child,
+.bb-rich-description-editor > *:first-child {
+  margin-top: 0;
+}
+.bb-rich-description-content > *:last-child,
+.bb-rich-description-editor > *:last-child {
+  margin-bottom: 0;
+}
+.bb-rich-description-content p,
+.bb-rich-description-editor p {
+  margin: 0 0 14px;
+}
+.bb-rich-description-content h1,
+.bb-rich-description-content h2,
+.bb-rich-description-content h3,
+.bb-rich-description-editor h1,
+.bb-rich-description-editor h2,
+.bb-rich-description-editor h3 {
+  margin: 20px 0 10px;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 760;
+  line-height: 1.24;
+}
+.bb-rich-description-content h1,
+.bb-rich-description-editor h1 {
+  font-size: 22px;
+}
+.bb-rich-description-content h2,
+.bb-rich-description-editor h2 {
+  font-size: 19px;
+}
+.bb-rich-description-content h3,
+.bb-rich-description-editor h3 {
+  font-size: 17px;
+}
+.bb-rich-description-content ul,
+.bb-rich-description-content ol,
+.bb-rich-description-editor ul,
+.bb-rich-description-editor ol {
+  margin: 10px 0 18px;
+  padding-left: 26px;
+}
+.bb-rich-description-content li,
+.bb-rich-description-editor li {
+  margin: 5px 0;
+  padding-left: 2px;
+}
+.bb-rich-description-content blockquote,
+.bb-rich-description-editor blockquote {
+  margin: 14px 0;
+  padding: 4px 0 4px 14px;
+  border-left: 3px solid rgba(255, 122, 97, 0.68);
+  color: rgba(255, 255, 255, 0.74);
+}
+.bb-rich-description-content code,
+.bb-rich-description-editor code {
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.9);
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+.bb-rich-description-content pre,
+.bb-rich-description-editor pre {
+  overflow: auto;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.055);
+}
+.bb-rich-description-content pre code,
+.bb-rich-description-editor pre code {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+.bb-rich-description-content a,
+.bb-rich-description-editor a {
+  color: var(--bb-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.bb-rich-description-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bb-rich-description-shell .ProseMirror {
+  min-height: 128px;
+  padding: 15px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 16px;
+  line-height: 1.58;
+}
+.bb-rich-description-shell:focus-within .ProseMirror {
+  border-color: rgba(255, 180, 0, 0.95);
+}
+.bb-rich-description-shell .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+.bb-rich-bubble-menu {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: #454545;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.45);
+}
+.bb-rich-toolbar-btn {
+  min-width: 40px;
+  height: 38px;
+  padding: 0 12px;
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.13);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 760;
+}
+.bb-rich-toolbar-btn:last-child {
+  border-right: none;
+}
+.bb-rich-toolbar-btn:hover,
+.bb-rich-toolbar-btn.active {
+  background: rgba(255, 255, 255, 0.11);
+  color: #fff;
+}
+.bb-rich-link-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+.bb-rich-link-input {
+  width: 260px;
+  height: 38px;
+  padding: 0 12px;
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.13);
+  outline: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: inherit;
+  font-size: 13px;
+}
+.bb-rich-link-input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+.bb-rich-link-action {
+  height: 38px;
+  min-width: 42px;
+  padding: 0 12px;
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.13);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 760;
+}
+.bb-rich-link-action:last-child {
+  border-right: none;
+}
+.bb-rich-link-action:hover {
+  background: rgba(255, 255, 255, 0.11);
+  color: #fff;
+}
+.bb-rich-link-action.ghost {
+  color: rgba(255, 255, 255, 0.62);
+}
+.bb-rich-description-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 .bb-task-workspace {
   display: flex;
@@ -1253,29 +1435,8 @@ select.bb-input {
   border-radius: 999px;
 }
 .bb-task-modal .bb-chat-scroll {
-  max-height: none;
-  overflow: visible;
-  padding-right: 0;
-}
-.bb-task-modal .bb-comment,
-.bb-task-modal .bb-comment.own {
-  max-width: 100%;
-  align-self: stretch;
-  flex-direction: row;
-  text-align: left;
-}
-.bb-task-modal .bb-comment.own .bb-comment-head {
-  flex-direction: row;
-}
-.bb-task-modal .bb-comment-bubble,
-.bb-task-modal .bb-comment.own .bb-comment-bubble {
-  display: block;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 14px;
-  line-height: 1.55;
+  max-height: min(48vh, 520px);
+  overflow-y: auto;
 }
 .bb-task-files-inline {
   padding-top: 2px;
@@ -1793,62 +1954,215 @@ select.bb-input {
   transition: width var(--bb-transition);
 }
 
-/* Comments — chat thread */
+/* Chat thread */
+.bb-chat-section {
+  gap: 13px;
+}
+.bb-chat-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.bb-chat-title span {
+  display: inline-flex;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 132, 255, 0.16);
+  color: #8bc2ff;
+  font-size: 12px;
+}
+.bb-chat-subtitle {
+  margin-top: 4px;
+  color: rgba(255, 255, 255, 0.46);
+  font-size: 12px;
+}
+.bb-chat-participants {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  padding-top: 1px;
+}
+.bb-chat-participants .bb-chat-avatar {
+  margin-left: -7px;
+  box-shadow: 0 0 0 2px #1f1f1f;
+}
+.bb-chat-avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #0b0d12;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0;
+  background-size: cover;
+  background-position: center;
+}
+.bb-chat-avatar.has-photo {
+  color: transparent;
+}
+.bb-chat-avatar.more {
+  background: rgba(255, 255, 255, 0.11);
+  color: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 0 0 2px #1f1f1f;
+}
 .bb-comments {
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 13px;
 }
-/* Scrollable history so the chat doesn't push everything below it down the
-   page; the section sits near the top of the drawer now, so it gets a fixed
-   budget of vertical space instead of growing unbounded. */
 .bb-chat-scroll {
-  max-height: 230px;
+  min-height: 210px;
+  max-height: 420px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(10, 132, 255, 0.08), transparent 26%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)),
+    #171717;
   scrollbar-width: thin;
 }
 .bb-comment {
   display: flex;
-  gap: 9px;
-  max-width: 92%;
+  gap: 8px;
+  max-width: min(82%, 720px);
+  align-items: flex-end;
 }
-.bb-comment-body {
-  flex: 1 1 auto;
+.bb-chat-message-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
 }
 .bb-comment-head {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  margin-bottom: 2px;
+  padding: 0 4px;
 }
 .bb-comment-head strong {
-  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11.5px;
+  font-weight: 700;
 }
 .bb-comment-bubble {
   display: inline-block;
-  background: var(--bb-card);
-  border: 1px solid var(--bb-border);
-  border-radius: var(--bb-radius-md);
-  padding: 6px 10px;
-  font-size: 12.5px;
-  line-height: 1.4;
+  background: #2d2d30;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 19px 19px 19px 7px;
+  padding: 10px 13px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  line-height: 1.48;
   word-break: break-word;
   white-space: pre-wrap;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
 }
-/* Own messages float right in an accent bubble, like a normal chat UI. */
 .bb-comment.own {
-  flex-direction: row-reverse;
   align-self: flex-end;
-  text-align: right;
+  justify-content: flex-end;
 }
-.bb-comment.own .bb-comment-head {
-  flex-direction: row-reverse;
+.bb-comment.own .bb-chat-message-stack {
+  align-items: flex-end;
+}
+.bb-comment.own .bb-chat-meta {
+  justify-content: flex-end;
 }
 .bb-comment.own .bb-comment-bubble {
-  background: var(--bb-accent-soft);
-  border-color: color-mix(in srgb, var(--bb-accent) 35%, var(--bb-border));
+  background: linear-gradient(180deg, #2f9bff, #0a84ff);
+  border-color: rgba(255, 255, 255, 0.12);
+  border-radius: 19px 19px 7px 19px;
+  color: #fff;
+}
+.bb-chat-empty {
+  min-height: 176px;
+  border: 1px dashed rgba(255, 255, 255, 0.13);
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.7);
+  text-align: center;
+}
+.bb-chat-empty small {
+  max-width: 280px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.bb-chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.045);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
+}
+.bb-chat-composer:focus-within {
+  border-color: rgba(10, 132, 255, 0.38);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.12);
+}
+.bb-chat-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 38px;
+  max-height: 122px;
+  padding: 9px 2px;
+  border: 0;
+  resize: vertical;
+  outline: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  line-height: 1.45;
+}
+.bb-chat-input:focus,
+.bb-chat-input:focus-visible {
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
+}
+.bb-chat-input::placeholder {
+  color: rgba(255, 255, 255, 0.36);
+}
+.bb-chat-send {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: #0a84ff;
+  color: #fff;
+  font-weight: 760;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    background 140ms ease,
+    opacity 140ms ease;
+}
+.bb-chat-send:not(:disabled):hover {
+  transform: translateY(-1px) scale(1.015);
+  background: #2493ff;
+}
+.bb-chat-send:disabled {
+  cursor: default;
+  opacity: 0.42;
 }
 .bb-comment-add {
   display: flex;
@@ -2677,9 +2991,9 @@ select.bb-input {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  z-index: 50;
+  z-index: 100000;
   width: max-content;
-  max-width: 260px;
+  max-width: min(320px, calc(100vw - 24px));
   padding: 8px 10px;
   border-radius: var(--bb-radius-sm);
   background: var(--vscode-editorHoverWidget-background, #1f2430);
@@ -2704,6 +3018,13 @@ select.bb-input {
 .bb-field-row .bb-field:last-child .bb-help-pop {
   left: auto;
   right: 0;
+}
+.bb-help-pop-floating {
+  display: block;
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 100000;
 }
 
 /* =========================================================================
@@ -2754,8 +3075,8 @@ select.bb-input {
 /* Shared tooltip wrapper */
 .bb-tt { position: relative; display: inline-flex; }
 .bb-tt-pop {
-  position: absolute; z-index: 60; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
-  width: max-content; max-width: 280px; padding: 8px 10px; border-radius: var(--bb-radius-sm);
+  position: absolute; z-index: 100000; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: min(280px, calc(100vw - 24px)); padding: 8px 10px; border-radius: var(--bb-radius-sm);
   background: var(--vscode-editorHoverWidget-background, #1f2430);
   color: var(--vscode-editorHoverWidget-foreground, var(--bb-text));
   border: 1px solid var(--vscode-editorHoverWidget-border, var(--bb-border-strong));
@@ -2766,6 +3087,12 @@ select.bb-input {
 .bb-tt-pop.side-bottom { bottom: auto; top: calc(100% + 6px); }
 .bb-tt-pop.side-right { bottom: auto; top: 50%; left: calc(100% + 6px); transform: translateY(-50%); }
 .bb-tt-pop.side-left { bottom: auto; top: 50%; left: auto; right: calc(100% + 6px); transform: translateY(-50%); }
+.bb-tt-pop-floating {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 100000;
+}
 
 /* Generic page shell for non-board views */
 .bb-page { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -3075,12 +3402,9 @@ select.bb-input {
 }
 .bb-cb-collab-card .bb-chat-scroll {
   max-height: 300px;
-  padding: 10px;
-  border: 1px solid var(--bb-border);
-  border-radius: var(--bb-radius-md);
-  background: var(--bb-bg);
+  min-height: 240px;
 }
-.bb-cb-collab-card .bb-comment-add {
+.bb-cb-collab-card .bb-chat-composer {
   margin-top: 8px;
 }
 .bb-cb-safety-card {

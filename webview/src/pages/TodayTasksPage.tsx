@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { AppConfig, BoardData, BoardTask, GitInfo } from "../types";
 import { t } from "../i18n";
 import { daysOverdue } from "../utils";
+import { richTextToPlainText } from "../richText";
 import { AppView } from "../components/navigation/MainNav";
 import { PageHeader } from "../components/layout/PageHeader";
 import { EmptyState } from "../components/common/EmptyState";
@@ -116,6 +117,7 @@ function TodayRow({
   const attachedCount = task.attachedFiles?.length ?? 0;
   const isAi = !!task.ai?.createdByAi;
   const { appearance } = appConfig;
+  const descriptionPreview = richTextToPlainText(task.description);
 
   const stop = (e: React.MouseEvent, fn: () => void) => {
     e.stopPropagation();
@@ -141,7 +143,7 @@ function TodayRow({
             </span>
           )}
         </div>
-        {task.description && <div className="bb-trow-desc">{task.description}</div>}
+        {descriptionPreview && <div className="bb-trow-desc">{descriptionPreview}</div>}
         <div className="bb-trow-meta">
           {colName && <span className="bb-meta-item bb-today-col">{colName}</span>}
           {appearance.showPriority && <PriorityBadge priority={task.priority} />}
