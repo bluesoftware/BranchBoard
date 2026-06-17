@@ -10,6 +10,7 @@ import {
   InboundMessage,
   NOTIFICATION_SOUND_IDS,
   NotificationType,
+  OperationResult,
   OutboundMessage,
 } from "../types";
 import { BoardService } from "../services/BoardService";
@@ -373,12 +374,12 @@ export class WebviewController {
   }
 
   /** Run the safe finish flow for a task and apply its board side-effects. */
-  private async runFinishFlow(msg: InboundMessage, taskId: string): Promise<void> {
+  private async runFinishFlow(msg: InboundMessage, taskId: string): Promise<OperationResult | undefined> {
     const { board, git, getConfig } = this.deps;
     const cfg = getConfig();
     const task = board.getBoard().tasks.find((t) => t.id === taskId);
-    if (!task || !task.branchName) {
-      return;
+    if (!task) {
+      return undefined;
     }
     const result = await finishTaskGitFlow(git, cfg, task, {
       confirm: (m, detail) => this.confirmGit(m, detail),
@@ -419,6 +420,7 @@ export class WebviewController {
     this.reply(msg, result);
     this.toast(result);
     await this.postGitInfo();
+    return result;
   }
 
   /**
@@ -432,17 +434,17 @@ export class WebviewController {
     msg: InboundMessage,
     taskId: string,
     toColumnId: string
-  ): Promise<void> {
+  ): Promise<OperationResult | undefined> {
     const { board, git, getConfig } = this.deps;
     const cfg = getConfig();
     if (!(await git.isRepo())) {
-      return;
+      return undefined;
     }
     const col = board.getColumn(toColumnId);
     const stage = col?.gitStage ?? "none";
     const task = board.getBoard().tasks.find((t) => t.id === taskId);
     if (!task) {
-      return;
+      return undefined;
     }
 
     if (stage === "feature") {
@@ -455,6 +457,8 @@ export class WebviewController {
         }
         this.reply(msg, res);
         this.toast(res);
+        await this.postGitInfo();
+        return res;
       } else {
         // Branch is recorded on the card but may not exist locally yet — create
         // it (from origin or current HEAD) instead of failing.
@@ -464,21 +468,22 @@ export class WebviewController {
         }
         this.reply(msg, res);
         this.toast(res);
+        await this.postGitInfo();
+        return res;
       }
-      await this.postGitInfo();
-      return;
     }
 
     if (stage === "review") {
       if (!task.branchName) {
-        this.toast({ ok: false, message: "Task has no branch — nothing to push." });
-        return;
+        const res = { ok: false, action: "pushBranch", message: "Task has no branch — nothing to push." };
+        this.toast(res);
+        return res;
       }
       const ensured = await git.ensureBranch(task.branchName);
       if (!ensured.ok) {
         this.reply(msg, ensured);
         this.toast(ensured);
-        return;
+        return ensured;
       }
       const res = await git.pushBranch(task.branchName);
       if (res.ok) {
@@ -494,19 +499,20 @@ export class WebviewController {
       this.reply(msg, res);
       this.toast(res);
       await this.postGitInfo();
-      return;
+      return res;
     }
 
     if (stage === "staging") {
       if (!task.branchName) {
-        this.toast({ ok: false, message: "Task has no branch — nothing to merge." });
-        return;
+        const res = { ok: false, action: "mergeIntoBranch", message: "Task has no branch — nothing to merge." };
+        this.toast(res);
+        return res;
       }
       const ensured = await git.ensureBranch(task.branchName);
       if (!ensured.ok) {
         this.reply(msg, ensured);
         this.toast(ensured);
-        return;
+        return ensured;
       }
       const target =
         (col?.targetBranch || (cfg.useDevBranch ? cfg.devBranch : cfg.defaultMainBranch) || "dev").trim();
@@ -515,7 +521,7 @@ export class WebviewController {
         "Checks out the target branch, pulls, merges --no-ff and pushes, then returns to your branch."
       );
       if (!ok) {
-        return;
+        return { ok: false, action: "mergeIntoBranch", message: "Merge cancelled." };
       }
       const res = await git.mergeIntoBranch(target, task.branchName);
       await board.logEvent(res.ok ? "merge_finished" : "merge_failed", {
@@ -526,13 +532,13 @@ export class WebviewController {
       this.reply(msg, res);
       this.toast(res);
       await this.postGitInfo();
-      return;
+      return res;
     }
 
     if (stage === "production") {
-      await this.runFinishFlow(msg, taskId);
-      return;
+      return this.runFinishFlow(msg, taskId);
     }
+    return undefined;
   }
 
   private async onMessage(msg: InboundMessage) {
@@ -1237,7 +1243,12 @@ export class WebviewController {
           // Git actions driven by the destination column's gitStage.
           const cfg = getConfig();
           if (changingColumn && cfg.runGitActionsOnMove) {
-            await this.runStageGitActions(msg, taskId, toColumnId);
+            const gitResult = await this.runStageGitActions(msg, taskId, toColumnId);
+            if (gitResult && !gitResult.ok && fromColumnId) {
+              await board.moveTask(taskId, fromColumnId, fromIndex);
+              this.postBoard(board.getBoard());
+              break;
+            }
           } else if (cfg.finishOnMoveToDone) {
             // Legacy opt-in: only run the finish flow when stage actions are off.
             const enteringDone = toColumnId === board.findDoneColumnId();
@@ -1587,14 +1598,16 @@ export class WebviewController {
     this.post({ type: "operationResult", requestId: msg.requestId, payload: result });
   }
 
-  private toast(result: { ok: boolean; message: string; detail?: string }) {
+  private toast(result: { ok: boolean; message: string; detail?: string; action?: string }) {
     // Successes are shown as in-board toasts via the operationResult reply.
     // Only surface failures as native notifications so errors aren't missed
     // even when the board isn't focused.
     if (!result.ok) {
-      vscode.window.showErrorMessage(
-        `BranchBoard: ${result.message}${result.detail ? `\n${result.detail}` : ""}`
-      );
+      if (result.action === "finishTask" && result.detail) {
+        vscode.window.showErrorMessage(`BranchBoard: ${result.message}`, { modal: true, detail: result.detail });
+        return;
+      }
+      vscode.window.showErrorMessage(`BranchBoard: ${result.message}${result.detail ? `\n${result.detail}` : ""}`);
     }
   }
 

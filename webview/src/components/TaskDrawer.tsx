@@ -93,17 +93,6 @@ function Help({ text }: { text: string }) {
   );
 }
 
-/** Section header with an optional help marker and right-aligned extra. */
-function SectionHead({ title, help, right }: { title: string; help?: string; right?: ReactNode }) {
-  return (
-    <div className="bb-section-head">
-      <span className="bb-section-title">{title}</span>
-      {help && <Help text={help} />}
-      {right && <span className="bb-section-right">{right}</span>}
-    </div>
-  );
-}
-
 /** Field label with an inline help marker. */
 function LabelHelp({ label, help }: { label: string; help: string }) {
   return (
@@ -111,6 +100,63 @@ function LabelHelp({ label, help }: { label: string; help: string }) {
       {label}
       <Help text={help} />
     </label>
+  );
+}
+
+function PropertyRow({
+  label,
+  help,
+  children,
+  muted = false,
+}: {
+  label: string;
+  help?: string;
+  children: ReactNode;
+  muted?: boolean;
+}) {
+  return (
+    <div className={`bb-task-property-row${muted ? " muted" : ""}`}>
+      <div className="bb-task-property-label">
+        <span>{label}</span>
+        {help && <Help text={help} />}
+      </div>
+      <div className="bb-task-property-value">{children}</div>
+    </div>
+  );
+}
+
+function TaskSection({
+  title,
+  help,
+  right,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  help?: string;
+  right?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <section className={`bb-task-section ${open ? "open" : ""}`}>
+      <div className="bb-task-section-head">
+        <button
+          type="button"
+          className="bb-task-section-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="bb-task-section-chevron">›</span>
+          <span className="bb-section-title">{title}</span>
+        </button>
+        {help && <Help text={help} />}
+        {right && <span className="bb-task-section-right">{right}</span>}
+      </div>
+      {open && <div className="bb-task-section-body">{children}</div>}
+    </section>
   );
 }
 
@@ -179,7 +225,7 @@ export function TaskDrawer(props: Props) {
   const suggested = suggestBranchName(task);
   const assignee = board.users.find((u) => u.id === task.assignedUserId) ?? null;
   const gitEnabled = !!git?.isRepo;
-  const onTaskBranch = !!git?.currentBranch && git.currentBranch === task.branchName;
+  const onTaskBranch = !!git?.currentBranch && git.currentBranch === branchName;
 
   const copyAiPrompt = () => {
     const text = buildAiPrompt({
@@ -220,249 +266,165 @@ export function TaskDrawer(props: Props) {
     "# git reset --hard HEAD~1",
   ].join("\n");
 
+  const currentColumn = board.columns.find((c) => c.id === task.columnId) ?? null;
+  const checklistDone = checklist.filter((item) => item.done).length;
+  const statusLabel =
+    task.status === "done"
+      ? t("task.statusDone")
+      : task.status === "in-progress"
+        ? t("task.statusInProgress")
+        : t("task.statusOpen");
+  const projectLabel = appConfig.projectName || board.projectName || board.boardTitle || "BranchBoard";
+  const columnLabel = currentColumn?.name ?? t("task.column");
+  const toggleDone = () => saveField({ status: task.status === "done" ? "open" : "done" });
+  const saveTitle = () => {
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setTitle(task.title);
+      return;
+    }
+    if (nextTitle !== task.title) {
+      saveField({ title: nextTitle });
+    }
+  };
+  const saveBranch = (nextBranch: string) => {
+    const normalizedBranch = nextBranch.trim();
+    if (normalizedBranch !== nextBranch) {
+      setBranchName(normalizedBranch);
+    }
+    if (normalizedBranch !== task.branchName) {
+      saveField({ branchName: normalizedBranch });
+    }
+  };
+
   return (
-    <div className="bb-drawer-overlay" onMouseDown={props.onClose}>
-      <aside className="bb-drawer bb-taskdrawer" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="bb-drawer-head">
-          <textarea
-            className="bb-drawer-title"
-            rows={1}
-            value={title}
-            title={t("task.help.title")}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={() => title.trim() && title !== task.title && saveField({ title: title.trim() })}
-          />
-          <button className="bb-iconbtn" onClick={props.onClose} title={t("settings.close")}>
-            ✕
-          </button>
-        </div>
-
-        <div className="bb-drawer-body">
-          {/* 1 ── Context: work log + history + overdue (TOP) */}
-          <WorkLog task={task} events={props.events} branchCommits={props.branchCommits} users={board.users} />
-
-          {/* 2 ── Changed files on the branch (code-review priority) */}
-          {gitEnabled && branchName && (
-            <div className="bb-card">
-              <SectionHead
-                title={t("task.files.title")}
-                help={t("task.help.changedFiles")}
-                right={props.branchFiles.length > 0 ? <span className="bb-count">{props.branchFiles.length}</span> : null}
-              />
-              {props.branchFilesLoading ? (
-                <div className="bb-muted small">{t("task.files.loading")}</div>
-              ) : props.branchFiles.length === 0 ? (
-                <div className="bb-muted small">{t("task.files.empty")}</div>
-              ) : (
-                <ul className="bb-files-filelist">
-                  {props.branchFiles.map((f: CommitFile) => (
-                    <li key={f.path} className="bb-file-row">
-                      <span
-                        className={`bb-badge ${FILE_STATUS_TONE[f.status] ?? "tone-neutral"}`}
-                        title={t(`cc.files.status.${f.status}`)}
-                      >
-                        {f.status}
-                      </span>
-                      <span
-                        className="bb-file-path"
-                        title={t("task.files.open")}
-                        onClick={() => props.onOpenFile(f.path)}
-                      >
-                        {f.path}
-                      </span>
-                      <span className="bb-file-num">
-                        <span className="add">+{f.additions}</span>{" "}
-                        <span className="del">−{f.deletions}</span>
-                      </span>
-                      <button
-                        className="bb-btn ghost sm"
-                        title={t("task.files.diff")}
-                        onClick={() => props.onOpenDiff(f.path)}
-                      >
-                        {t("task.files.diff")}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {/* 3 ── Details (assignee, priority, status, column, due, description) */}
-          <div className="bb-card">
-            <SectionHead title={t("task.details")} help={t("task.help.details")} />
-            <div className="bb-field-row">
-              <div className="bb-field">
-                <LabelHelp label={t("task.type")} help={t("task.help.type")} />
-                <select
-                  className="bb-input"
-                  value={task.taskType ?? "feature"}
-                  onChange={(e) => saveField({ taskType: e.target.value as TaskType })}
-                  disabled={!!task.branchName}
-                  title={task.branchName ? t("task.typeLockedHint") : undefined}
-                >
-                  {TASK_TYPES.map((tp) => (
-                    <option key={tp} value={tp}>
-                      {t(`taskType.${tp}`)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="bb-field-row">
-              <div className="bb-field">
-                <LabelHelp label={t("task.assignee")} help={t("task.help.assignee")} />
-                <select
-                  className="bb-input"
-                  value={task.assignedUserId ?? ""}
-                  onChange={(e) => props.onAssign(e.target.value || null)}
-                >
-                  <option value="">{t("task.unassigned")}</option>
-                  {board.users.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                      {u.id === props.currentUserId ? ` (${t("topBar.you")})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="bb-field">
-                <LabelHelp label={t("task.priority")} help={t("task.help.priority")} />
-                <select
-                  className="bb-input"
-                  value={task.priority}
-                  onChange={(e) => saveField({ priority: e.target.value as TaskPriority })}
-                >
-                  {PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {t(`priority.${p}`)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="bb-field-row">
-              <div className="bb-field">
-                <LabelHelp label={t("task.status")} help={t("task.help.status")} />
-                <select
-                  className="bb-input"
-                  value={task.status}
-                  onChange={(e) => saveField({ status: e.target.value as BoardTask["status"] })}
-                >
-                  <option value="open">{t("task.statusOpen")}</option>
-                  <option value="in-progress">{t("task.statusInProgress")}</option>
-                  <option value="done">{t("task.statusDone")}</option>
-                </select>
-              </div>
-              <div className="bb-field">
-                <LabelHelp label={t("task.column")} help={t("task.help.column")} />
-                <select
-                  className="bb-input"
-                  value={task.columnId}
-                  onChange={(e) => saveField({ columnId: e.target.value })}
-                >
-                  {[...board.columns]
-                    .sort((a, b) => a.position - b.position)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="bb-field-row">
-              <div className="bb-field">
-                <LabelHelp label={t("task.dueDate")} help={t("task.help.dueDate")} />
-                <input
-                  type="date"
-                  className="bb-input"
-                  value={task.dueDate ?? ""}
-                  onChange={(e) => saveField({ dueDate: e.target.value || null })}
-                />
-              </div>
-              <div className="bb-field" />
-            </div>
-
-            <div className="bb-field">
-              <LabelHelp label={t("task.description")} help={t("task.help.description")} />
-              <textarea
-                className="bb-input"
-                rows={3}
-                value={description}
-                placeholder={t("task.descriptionPlaceholder")}
-                onChange={(e) => setDescription(e.target.value)}
-                onBlur={() => description !== task.description && saveField({ description })}
-              />
-            </div>
-
-            {/* Checklist + comments live right here — the highest-traffic part of a
-                task, kept above the fold since drawer space is tight. Acceptance
-                criteria as a separate field was removed; the AI prompt now derives
-                it from unchecked checklist items (see utils.buildAiPrompt). */}
-            <Checklist items={checklist} onChange={saveChecklist} />
-            <Comments comments={task.comments} users={board.users} currentUserId={props.currentUserId} onAdd={props.onAddComment} />
-
-            {/* Attached project files (fed into the AI prompt) */}
-            <div className="bb-field">
-              <LabelHelp label={t("task.attachedFiles")} help={t("task.help.attachedFiles")} />
-              {attachedFiles.length > 0 && (
-                <ul className="bb-attached-list">
-                  {attachedFiles.map((f) => (
-                    <li key={f} className="bb-attached-item">
-                      <FileIcon size={12} />
-                      <span
-                        className="bb-attached-path"
-                        title={t("task.files.open")}
-                        onClick={() => props.onOpenFile(f)}
-                      >
-                        {f}
-                      </span>
-                      <button
-                        className="bb-iconbtn"
-                        title={t("common.delete")}
-                        onClick={() => removeAttachedFile(f)}
-                      >
-                        ✕
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="bb-comment-add">
-                <input
-                  className="bb-input bb-mono"
-                  list="bb-file-suggest"
-                  value={fileInput}
-                  placeholder={t("task.attachPlaceholder")}
-                  onChange={(e) => {
-                    setFileInput(e.target.value);
-                    searchFiles(e.target.value);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addAttachedFile(fileInput);
-                    }
-                  }}
-                />
-                <datalist id="bb-file-suggest">
-                  {props.fileSuggestions.map((f) => (
-                    <option key={f} value={f} />
-                  ))}
-                </datalist>
-                <button className="bb-btn" disabled={!fileInput.trim()} onClick={() => addAttachedFile(fileInput)}>
-                  {t("task.addItem")}
-                </button>
-              </div>
-            </div>
+    <div className="bb-task-modal-overlay" onMouseDown={props.onClose}>
+      <section className="bb-task-modal" onMouseDown={(e) => e.stopPropagation()}>
+        <header className="bb-task-modal-head">
+          <div className="bb-task-modal-breadcrumb" aria-label="Kontekst zadania">
+            <span className="bb-task-breadcrumb-hash">#</span>
+            <span>{projectLabel}</span>
+            <span className="bb-task-breadcrumb-separator">/</span>
+            <span>{columnLabel}</span>
+            <span className="bb-task-modal-id">#{task.id.slice(-6)}</span>
           </div>
+          <div className="bb-task-modal-actions">
+            <button className="bb-task-modal-close" onClick={props.onClose} title={t("settings.close")}>
+              ×
+            </button>
+          </div>
+        </header>
+
+        <div className="bb-task-modal-body">
+          <main className="bb-task-detail-main">
+            <section className="bb-task-title-panel">
+              <button
+                type="button"
+                className={`bb-task-complete-toggle ${task.status === "done" ? "done" : ""}`}
+                aria-pressed={task.status === "done"}
+                title={statusLabel}
+                onClick={toggleDone}
+              >
+                {task.status === "done" ? "✓" : ""}
+              </button>
+              <div className="bb-task-title-stack">
+                <textarea
+                  className="bb-task-modal-title"
+                  rows={1}
+                  value={title}
+                  title={t("task.help.title")}
+                  onChange={(e) => setTitle(e.target.value)}
+                  onBlur={saveTitle}
+                />
+                <textarea
+                  className="bb-task-description-inline"
+                  rows={3}
+                  value={description}
+                  placeholder={t("task.descriptionPlaceholder")}
+                  title={t("task.help.description")}
+                  onChange={(e) => setDescription(e.target.value)}
+                  onBlur={() => description !== task.description && saveField({ description })}
+                />
+              </div>
+            </section>
+            <div className="bb-task-workspace">
+              <Checklist titleLabel="Pod-zadania" items={checklist} onChange={saveChecklist} />
+              <Comments comments={task.comments} users={board.users} currentUserId={props.currentUserId} onAdd={props.onAddComment} />
+
+              <section className="bb-section bb-task-files-inline">
+                <div className="bb-section-title">
+                  {t("task.attachedFiles")} {attachedFiles.length > 0 ? `(${attachedFiles.length})` : ""}
+                  <Help text={t("task.help.attachedFiles")} />
+                </div>
+                {attachedFiles.length > 0 && (
+                  <ul className="bb-attached-list">
+                    {attachedFiles.map((f) => (
+                      <li key={f} className="bb-attached-item">
+                        <FileIcon size={12} />
+                        <span
+                          className="bb-attached-path"
+                          title={t("task.files.open")}
+                          onClick={() => props.onOpenFile(f)}
+                        >
+                          {f}
+                        </span>
+                        <button
+                          className="bb-iconbtn"
+                          title={t("common.delete")}
+                          onClick={() => removeAttachedFile(f)}
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="bb-comment-add">
+                  <input
+                    className="bb-input bb-mono"
+                    list="bb-file-suggest"
+                    value={fileInput}
+                    placeholder={t("task.attachPlaceholder")}
+                    onChange={(e) => {
+                      setFileInput(e.target.value);
+                      searchFiles(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addAttachedFile(fileInput);
+                      }
+                    }}
+                  />
+                  <datalist id="bb-file-suggest">
+                    {props.fileSuggestions.map((f) => (
+                      <option key={f} value={f} />
+                    ))}
+                  </datalist>
+                  <button className="bb-btn" disabled={!fileInput.trim()} onClick={() => addAttachedFile(fileInput)}>
+                    {t("task.addItem")}
+                  </button>
+                </div>
+              </section>
+
+              <TaskSection
+                title="Zaawansowane / techniczne"
+                help={t("task.help.git")}
+                right={
+                  <span className={`bb-count ${branchName ? "ok" : ""}`}>
+                    {branchName ? branchName : t("task.noBranch")}
+                  </span>
+                }
+              >
+                <div className="bb-task-advanced">
 
           {/* 4 ── Git */}
-          <div className="bb-card">
-            <SectionHead title="Git" help={t("task.help.git")} />
+          <TaskSection
+            title="Git"
+            help={t("task.help.git")}
+            defaultOpen={!!branchName}
+            right={<span className={`bb-count ${onTaskBranch ? "ok" : ""}`}>{branchName ? t("task.gitBranch") : t("task.noBranch")}</span>}
+          >
             <div className="bb-field">
               <LabelHelp label={t("task.gitBranch")} help={t("task.help.branch")} />
               <div className="bb-branch-row">
@@ -471,7 +433,7 @@ export function TaskDrawer(props: Props) {
                   value={branchName}
                   placeholder={suggested}
                   onChange={(e) => setBranchName(e.target.value)}
-                  onBlur={() => branchName !== task.branchName && saveField({ branchName })}
+                  onBlur={() => saveBranch(branchName)}
                 />
                 {!branchName && (
                   <button
@@ -479,7 +441,7 @@ export function TaskDrawer(props: Props) {
                     title={t("task.help.suggest")}
                     onClick={() => {
                       setBranchName(suggested);
-                      saveField({ branchName: suggested });
+                      saveBranch(suggested);
                     }}
                   >
                     {t("task.suggest")}
@@ -560,11 +522,55 @@ export function TaskDrawer(props: Props) {
                 </button>
               )}
             </div>
-          </div>
+          </TaskSection>
+
+          {gitEnabled && branchName && (
+            <TaskSection
+              title={t("task.files.title")}
+              help={t("task.help.changedFiles")}
+              right={props.branchFiles.length > 0 ? <span className="bb-count">{props.branchFiles.length}</span> : null}
+            >
+              {props.branchFilesLoading ? (
+                <div className="bb-muted small">{t("task.files.loading")}</div>
+              ) : props.branchFiles.length === 0 ? (
+                <div className="bb-muted small">{t("task.files.empty")}</div>
+              ) : (
+                <ul className="bb-files-filelist">
+                  {props.branchFiles.map((f: CommitFile) => (
+                    <li key={f.path} className="bb-file-row">
+                      <span
+                        className={`bb-badge ${FILE_STATUS_TONE[f.status] ?? "tone-neutral"}`}
+                        title={t(`cc.files.status.${f.status}`)}
+                      >
+                        {f.status}
+                      </span>
+                      <span
+                        className="bb-file-path"
+                        title={t("task.files.open")}
+                        onClick={() => props.onOpenFile(f.path)}
+                      >
+                        {f.path}
+                      </span>
+                      <span className="bb-file-num">
+                        <span className="add">+{f.additions}</span>{" "}
+                        <span className="del">−{f.deletions}</span>
+                      </span>
+                      <button
+                        className="bb-btn ghost sm"
+                        title={t("task.files.diff")}
+                        onClick={() => props.onOpenDiff(f.path)}
+                      >
+                        {t("task.files.diff")}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TaskSection>
+          )}
 
           {/* 5 ── Deployments */}
-          <div className="bb-card">
-            <SectionHead title={t("task.deploy.title")} help={t("task.help.deploy")} />
+          <TaskSection title={t("task.deploy.title")} help={t("task.help.deploy")}>
             {latestDevDeploy && (
               <div className={`bb-callout ${latestDevDeploy.status === "failed" ? "warn" : "info"}`}>
                 {t("task.deploy.lastStatus", {
@@ -613,11 +619,10 @@ export function TaskDrawer(props: Props) {
             {!policy.devDeployCommand && (
               <span className="bb-muted small">{t("task.deploy.configureHint")}</span>
             )}
-          </div>
+          </TaskSection>
 
           {/* 6 ── Safety / rollback */}
-          <div className="bb-card">
-            <SectionHead title={t("task.safety.title")} help={t("task.help.safety")} />
+          <TaskSection title={t("task.safety.title")} help={t("task.help.safety")}>
             <div className="bb-callout info">
               {policy.createBackupBranchBeforeMerge
                 ? t("task.safety.backupOn")
@@ -673,11 +678,10 @@ export function TaskDrawer(props: Props) {
               </button>
             </div>
             <span className="bb-muted small">{t("task.safety.note")}</span>
-          </div>
+          </TaskSection>
 
           {/* 7 ── AI */}
-          <div className="bb-card">
-            <SectionHead title="AI" help={t("task.help.ai")} />
+          <TaskSection title="AI" help={t("task.help.ai")} right={ai.createdByAi ? <span className="bb-count">ON</span> : null}>
             <button className="bb-btn accent" onClick={copyAiPrompt} title={t("task.copyAiPromptHint")}>
               <SparkleIcon size={13} />
               {t("task.copyAiPrompt")}
@@ -732,19 +736,147 @@ export function TaskDrawer(props: Props) {
                 )}
               </>
             )}
-          </div>
+          </TaskSection>
 
+          <TaskSection title={t("task.context")} help={t("task.help.context")}>
+            <WorkLog task={task} events={props.events} branchCommits={props.branchCommits} users={board.users} />
+          </TaskSection>
+
+                </div>
+              </TaskSection>
+            </div>
+          </main>
+
+          <aside className="bb-task-properties" aria-label="Właściwości zadania">
+            <div className="bb-task-properties-inner">
+              <PropertyRow label="Projekt">
+                <span className="bb-task-project-value">
+                  <span aria-hidden="true">#</span>
+                  {projectLabel} / {columnLabel}
+                </span>
+              </PropertyRow>
+
+              <PropertyRow label={t("task.assignee")} help={t("task.help.assignee")}>
+                <select
+                  className="bb-task-property-control"
+                  value={task.assignedUserId ?? ""}
+                  onChange={(e) => props.onAssign(e.target.value || null)}
+                >
+                  <option value="">{t("task.unassigned")}</option>
+                  {board.users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                      {u.id === props.currentUserId ? ` (${t("topBar.you")})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </PropertyRow>
+
+              <PropertyRow label={t("task.dueDate")} help={t("task.help.dueDate")}>
+                <input
+                  type="date"
+                  className="bb-task-property-control"
+                  value={task.dueDate ?? ""}
+                  onChange={(e) => saveField({ dueDate: e.target.value || null })}
+                />
+              </PropertyRow>
+
+              <PropertyRow label={t("task.priority")} help={t("task.help.priority")}>
+                <select
+                  className="bb-task-property-control"
+                  value={task.priority}
+                  onChange={(e) => saveField({ priority: e.target.value as TaskPriority })}
+                >
+                  {PRIORITIES.map((p) => (
+                    <option key={p} value={p}>
+                      {t(`priority.${p}`)}
+                    </option>
+                  ))}
+                </select>
+              </PropertyRow>
+
+              <PropertyRow label={t("task.status")} help={t("task.help.status")}>
+                <select
+                  className="bb-task-property-control"
+                  value={task.status}
+                  onChange={(e) => saveField({ status: e.target.value as BoardTask["status"] })}
+                >
+                  <option value="open">{t("task.statusOpen")}</option>
+                  <option value="in-progress">{t("task.statusInProgress")}</option>
+                  <option value="done">{t("task.statusDone")}</option>
+                </select>
+              </PropertyRow>
+
+              <PropertyRow label={t("task.column")} help={t("task.help.column")}>
+                <select
+                  className="bb-task-property-control"
+                  value={task.columnId}
+                  onChange={(e) => saveField({ columnId: e.target.value })}
+                >
+                  {[...board.columns]
+                    .sort((a, b) => a.position - b.position)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </select>
+              </PropertyRow>
+
+              <PropertyRow label={t("task.type")} help={t("task.help.type")}>
+                <select
+                  className="bb-task-property-control"
+                  value={task.taskType ?? "feature"}
+                  onChange={(e) => saveField({ taskType: e.target.value as TaskType })}
+                  disabled={!!task.branchName}
+                  title={task.branchName ? t("task.typeLockedHint") : undefined}
+                >
+                  {TASK_TYPES.map((tp) => (
+                    <option key={tp} value={tp}>
+                      {t(`taskType.${tp}`)}
+                    </option>
+                  ))}
+                </select>
+              </PropertyRow>
+
+              <PropertyRow label={t("task.gitBranch")} help={t("task.help.branch")}>
+                <div className="bb-task-branch-property">
+                  <input
+                    className="bb-task-property-control mono"
+                    value={branchName}
+                    placeholder="Dodaj branch"
+                    onChange={(e) => setBranchName(e.target.value)}
+                    onBlur={() => saveBranch(branchName)}
+                  />
+                  {!branchName && (
+                    <button
+                      type="button"
+                      className="bb-task-property-plus"
+                      title={t("task.help.suggest")}
+                      onClick={() => {
+                        setBranchName(suggested);
+                        saveBranch(suggested);
+                      }}
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+              </PropertyRow>
+
+            </div>
+          </aside>
         </div>
 
-        <div className="bb-drawer-foot">
+        <footer className="bb-task-modal-foot">
           <span className="bb-muted small">
             {assignee ? t("task.assignedTo", { name: assignee.name }) : t("task.unassigned")} · #{task.id.slice(-6)}
           </span>
           <button className="bb-btn danger" onClick={props.onDelete}>
             {t("task.delete")}
           </button>
-        </div>
-      </aside>
+        </footer>
+      </section>
     </div>
   );
 }

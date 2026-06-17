@@ -758,9 +758,6 @@ export function App() {
               patch: { status: task.status === "done" ? "open" : "done" },
             })
           }
-          onCheckout={(branchName) => post("checkoutBranch", { branchName })}
-          onPush={(branchName) => post("pushBranch", { branchName })}
-          onFinish={(taskId) => post("finishTask", { taskId })}
         />
       )}
 

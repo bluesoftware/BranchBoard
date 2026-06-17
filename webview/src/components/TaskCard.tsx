@@ -1,8 +1,7 @@
 import { AppConfig, BoardTask, BoardUser, GitInfo, TaskPriority } from "../types";
 import { t } from "../i18n";
 import { daysOverdue } from "../utils";
-import { Tooltip } from "./common/Tooltip";
-import { BranchIcon, CalendarIcon, CheckoutIcon, CommentIcon, FileIcon, FinishIcon, PushIcon, SparkleIcon } from "./Icons";
+import { BranchIcon, CalendarIcon, CommentIcon, FileIcon, SparkleIcon } from "./Icons";
 
 interface Props {
   task: BoardTask;
@@ -13,9 +12,6 @@ interface Props {
   onToggleDone: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
-  onCheckout: (branchName: string) => void;
-  onPush: (branchName: string) => void;
-  onFinish: (taskId: string) => void;
 }
 
 export function PriorityBadge({ priority }: { priority: TaskPriority }) {
@@ -39,9 +35,6 @@ export function TaskCard({
   onToggleDone,
   onDragStart,
   onDragEnd,
-  onCheckout,
-  onPush,
-  onFinish,
 }: Props) {
   const assignee = users.find((u) => u.id === task.assignedUserId) ?? null;
   const checklistTotal = task.checklist.length;
@@ -49,7 +42,7 @@ export function TaskCard({
   const isDone = task.status === "done";
   const { appearance } = appConfig;
   const hasBranch = !!task.branchName;
-  const gitEnabled = !!git?.isRepo;
+  const isCurrentBranch = !!git?.currentBranch && git.currentBranch === task.branchName;
   const isAi = !!task.ai?.createdByAi;
   const attachedCount = task.attachedFiles?.length ?? 0;
   const overdue = isDone ? null : daysOverdue(task.dueDate);
@@ -80,9 +73,18 @@ export function TaskCard({
 
   return (
     <div
-      className={`bb-card ${isDone ? "done" : ""} prio-${task.priority}`}
+      className={`bb-task-card ${isDone ? "done" : ""} prio-${task.priority}`}
       draggable
+      role="button"
+      tabIndex={0}
+      aria-label={t("task.open")}
       onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", task.id);
@@ -90,26 +92,21 @@ export function TaskCard({
       }}
       onDragEnd={onDragEnd}
     >
-      <button
-        className={`bb-check ${isDone ? "checked" : ""}`}
-        title={isDone ? t("task.statusOpen") : t("task.statusDone")}
-        onClick={(e) => stop(e, onToggleDone)}
-      >
-        {isDone ? "✓" : ""}
-      </button>
+      <div className="bb-task-card-main">
+        <button
+          className={`bb-check ${isDone ? "checked" : ""}`}
+          title={isDone ? t("task.statusOpen") : t("task.statusDone")}
+          onClick={(e) => stop(e, onToggleDone)}
+        >
+          {isDone ? "✓" : ""}
+        </button>
 
-      <div className="bb-card-body">
-        <div className="bb-card-titlerow">
-          <div className="bb-card-title">{task.title}</div>
-          <div className="bb-card-flags">
+        <div className="bb-task-card-copy">
+          <div className="bb-task-card-titleline">
+            <div className="bb-task-card-title">{task.title}</div>
             {isAi && (
               <span className="bb-flag ai" title={t("card.aiFlag")}>
                 <SparkleIcon size={11} />
-              </span>
-            )}
-            {hasBranch && (
-              <span className="bb-flag branch" title={task.branchName}>
-                <BranchIcon size={11} />
               </span>
             )}
             {due && (
@@ -119,10 +116,12 @@ export function TaskCard({
               </span>
             )}
           </div>
+          {task.description && <div className="bb-task-card-desc">{task.description}</div>}
         </div>
-        {task.description && <div className="bb-card-desc">{task.description}</div>}
+      </div>
 
-        <div className="bb-card-meta">
+      <div className="bb-task-card-bottom">
+        <div className="bb-task-card-meta">
           {appearance.showPriority && <PriorityBadge priority={task.priority} />}
           {attachedCount > 0 && (
             <span className="bb-meta-item" title={t("card.attachedFiles", { count: attachedCount })}>
@@ -131,7 +130,7 @@ export function TaskCard({
             </span>
           )}
           {appearance.showBranchBadges && hasBranch && (
-            <span className="bb-meta-item branch" title={task.branchName}>
+            <span className={`bb-meta-item branch ${isCurrentBranch ? "current" : ""}`} title={task.branchName}>
               <BranchIcon size={11} />
               {task.branchName.replace(/^feature\//, "")}
             </span>
@@ -148,45 +147,13 @@ export function TaskCard({
             </span>
           )}
         </div>
+
+        {appearance.showAvatars && assignee && (
+          <span className="bb-avatar" style={{ background: assignee.color }} title={assignee.name}>
+            {assignee.avatarText}
+          </span>
+        )}
       </div>
-
-      {appearance.showAvatars && assignee && (
-        <span className="bb-avatar" style={{ background: assignee.color }} title={assignee.name}>
-          {assignee.avatarText}
-        </span>
-      )}
-
-      {gitEnabled && hasBranch && (
-        <div className="bb-card-actions">
-          <Tooltip text={t("tooltips.git.checkout")}>
-            <button
-              className="bb-iconbtn"
-              aria-label={t("task.checkoutBranch")}
-              onClick={(e) => stop(e, () => onCheckout(task.branchName))}
-            >
-              <CheckoutIcon size={12} />
-            </button>
-          </Tooltip>
-          <Tooltip text={t("tooltips.git.push")}>
-            <button
-              className="bb-iconbtn"
-              aria-label={t("task.pushBranch")}
-              onClick={(e) => stop(e, () => onPush(task.branchName))}
-            >
-              <PushIcon size={12} />
-            </button>
-          </Tooltip>
-          <Tooltip text={t("task.finishHint")}>
-            <button
-              className="bb-iconbtn"
-              aria-label={t("task.finish")}
-              onClick={(e) => stop(e, () => onFinish(task.id))}
-            >
-              <FinishIcon size={12} />
-            </button>
-          </Tooltip>
-        </div>
-      )}
     </div>
   );
 }

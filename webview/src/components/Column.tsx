@@ -21,9 +21,6 @@ interface Props {
   onRenameColumn: (id: string, name: string) => void;
   onDeleteColumn: (id: string) => void;
   onConfigureColumn: (id: string) => void;
-  onCheckout: (branchName: string) => void;
-  onPush: (branchName: string) => void;
-  onFinish: (taskId: string) => void;
   onTaskDragStart: (taskId: string) => void;
   onTaskDragEnd: () => void;
   onTaskDragOver: (index: number) => void;
@@ -220,9 +217,6 @@ export function Column(props: Props) {
               onToggleDone={() => props.onToggleDone(task)}
               onDragStart={() => props.onTaskDragStart(task.id)}
               onDragEnd={props.onTaskDragEnd}
-              onCheckout={props.onCheckout}
-              onPush={props.onPush}
-              onFinish={props.onFinish}
             />
           </div>
         ))}

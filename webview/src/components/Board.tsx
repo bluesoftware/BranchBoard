@@ -21,9 +21,6 @@ interface Props {
   onConfigureColumn: (id: string) => void;
   onMoveColumn: (orderedIds: string[]) => void;
   onToggleDone: (task: BoardTask) => void;
-  onCheckout: (branchName: string) => void;
-  onPush: (branchName: string) => void;
-  onFinish: (taskId: string) => void;
 }
 
 export function Board(props: Props) {
@@ -76,9 +73,6 @@ export function Board(props: Props) {
           onRenameColumn={props.onRenameColumn}
           onDeleteColumn={props.onDeleteColumn}
           onConfigureColumn={props.onConfigureColumn}
-          onCheckout={props.onCheckout}
-          onPush={props.onPush}
-          onFinish={props.onFinish}
           onTaskDragStart={(taskId) => setDrag({ taskId, fromColumnId: col.id })}
           onTaskDragEnd={() => {
             setDrag(null);

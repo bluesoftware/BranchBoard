@@ -53,6 +53,18 @@ export class GitService {
     });
   }
 
+  private async requireCleanWorkingTree(action: string, message: string): Promise<OperationResult | null> {
+    if (!(await this.hasUncommittedChanges())) {
+      return null;
+    }
+    return { ok: false, action, message };
+  }
+
+  private async fastForwardFromRemote(remote: string, branch: string): Promise<GitExecResult> {
+    await this.run(["fetch", remote, branch]);
+    return this.run(["-c", "merge.autoStash=false", "merge", "--ff-only", `${remote}/${branch}`]);
+  }
+
   /** Validate a branch name with git's own checker; rejects unsafe input. */
   private async assertValidBranchName(name: string): Promise<void> {
     const trimmed = (name || "").trim();
@@ -412,6 +424,13 @@ export class GitService {
   async updateBranchFromMain(strategy: "merge" | "rebase"): Promise<OperationResult> {
     const remote = this.getConfig().remoteName || "origin";
     const main = await this.getMainBranch();
+    const dirty = await this.requireCleanWorkingTree(
+      "updateBranchFromMain",
+      `Working tree is not clean. Commit or stash changes before updating this branch from ${remote}/${main}.`
+    );
+    if (dirty) {
+      return dirty;
+    }
     try {
       await this.run(["fetch", remote, main]);
     } catch (err: any) {
@@ -419,10 +438,10 @@ export class GitService {
     }
     try {
       if (strategy === "rebase") {
-        const { stdout } = await this.run(["rebase", `${remote}/${main}`]);
+        const { stdout } = await this.run(["-c", "rebase.autoStash=false", "rebase", `${remote}/${main}`]);
         return { ok: true, action: "updateBranchFromMain", message: `Rebased onto ${remote}/${main}.`, detail: stdout.trim() };
       }
-      const { stdout } = await this.run(["merge", "--no-edit", `${remote}/${main}`]);
+      const { stdout } = await this.run(["-c", "merge.autoStash=false", "merge", "--no-edit", `${remote}/${main}`]);
       return { ok: true, action: "updateBranchFromMain", message: `Merged ${remote}/${main} into the current branch.`, detail: stdout.trim() };
     } catch (err: any) {
       // Abort a conflicted merge/rebase so the working tree stays clean.
@@ -793,10 +812,17 @@ export class GitService {
     try {
       const remote = this.getConfig().remoteName || "origin";
       const main = await this.getMainBranch();
-      await this.run(["pull", remote, main]);
-      return { ok: true, action: "pullMain", message: `Pulled ${remote}/${main}.` };
+      const dirty = await this.requireCleanWorkingTree(
+        "pullMain",
+        `Working tree is not clean. Commit or stash changes before updating ${main}.`
+      );
+      if (dirty) {
+        return dirty;
+      }
+      await this.fastForwardFromRemote(remote, main);
+      return { ok: true, action: "pullMain", message: `Updated ${main} from ${remote}/${main}.` };
     } catch (err: any) {
-      return { ok: false, action: "pullMain", message: "Pull failed.", detail: err?.message };
+      return { ok: false, action: "pullMain", message: "Updating main failed.", detail: err?.message };
     }
   }
 
@@ -805,7 +831,22 @@ export class GitService {
     try {
       await this.assertValidBranchName(branchName);
       const main = await this.getMainBranch();
-      const { stdout } = await this.run(["merge", "--no-ff", branchName, "-m", `Merge ${branchName} into ${main}`]);
+      const dirty = await this.requireCleanWorkingTree(
+        "mergeBranchToMain",
+        `Working tree is not clean. Commit or stash changes before merging '${branchName}' into ${main}.`
+      );
+      if (dirty) {
+        return dirty;
+      }
+      const { stdout } = await this.run([
+        "-c",
+        "merge.autoStash=false",
+        "merge",
+        "--no-ff",
+        branchName,
+        "-m",
+        `Merge ${branchName} into ${main}`,
+      ]);
       return { ok: true, action: "mergeBranchToMain", message: `Merged '${branchName}' into ${main}.`, detail: stdout.trim() };
     } catch (err: any) {
       // Likely a conflict. Abort the half-done merge so the tree stays clean.
@@ -839,6 +880,13 @@ export class GitService {
       await this.assertValidBranchName(branchName);
       const remote = this.getConfig().remoteName || "origin";
       const original = await this.getCurrentBranch();
+      const dirty = await this.requireCleanWorkingTree(
+        action,
+        `Working tree is not clean. Commit or stash changes before merging '${branchName}' into ${target}.`
+      );
+      if (dirty) {
+        return dirty;
+      }
 
       // Make sure the work is pushed before integrating.
       try {
@@ -869,7 +917,7 @@ export class GitService {
             const main = await this.getMainBranch();
             await this.run(["checkout", main]);
             try {
-              await this.run(["pull", remote, main]);
+              await this.fastForwardFromRemote(remote, main);
             } catch {
               /* main may have no upstream yet — continue with local */
             }
@@ -889,14 +937,22 @@ export class GitService {
         }
       } else {
         try {
-          await this.run(["pull", remote, target]);
+          await this.fastForwardFromRemote(remote, target);
         } catch {
           /* target may have no upstream yet — continue with local */
         }
       }
 
       try {
-        await this.run(["merge", "--no-ff", branchName, "-m", `Merge ${branchName} into ${target}`]);
+        await this.run([
+          "-c",
+          "merge.autoStash=false",
+          "merge",
+          "--no-ff",
+          branchName,
+          "-m",
+          `Merge ${branchName} into ${target}`,
+        ]);
       } catch (err: any) {
         try {
           await this.run(["merge", "--abort"]);
@@ -1115,6 +1171,30 @@ export interface FinishResult extends OperationResult {
   markDone?: boolean;
 }
 
+function finishFailure(
+  config: BranchBoardConfig,
+  message: { pl: string; en: string },
+  steps: { pl: string[]; en: string[] },
+  gitDetail?: string
+): FinishResult {
+  const isPl = config.language !== "en";
+  const selectedSteps = isPl ? steps.pl : steps.en;
+  const detailLines = [
+    isPl ? "Co zrobić:" : "How to fix:",
+    ...selectedSteps.map((step, index) => `${index + 1}. ${step}`),
+  ];
+  const trimmedDetail = (gitDetail || "").trim();
+  if (trimmedDetail) {
+    detailLines.push("", isPl ? "Szczegóły Git:" : "Git details:", trimmedDetail);
+  }
+  return {
+    ok: false,
+    action: "finishTask",
+    message: isPl ? message.pl : message.en,
+    detail: detailLines.join("\n"),
+  };
+}
+
 /**
  * Safe "finish task" flow. Never merges or deletes without confirmation, never
  * marks done if a git step failed.
@@ -1126,17 +1206,52 @@ export async function finishTaskGitFlow(
   cb: FinishCallbacks
 ): Promise<FinishResult> {
   const branch = (task.branchName || "").trim();
+  const configuredRemote = config.remoteName || "origin";
+  const configuredMain = config.defaultMainBranch || "main";
+  const configuredProductionRef = `${configuredRemote}/${configuredMain}`;
   if (!branch) {
-    return { ok: false, action: "finishTask", message: "This task has no branch name. Add one first." };
+    return finishFailure(
+      config,
+      {
+        pl: "Nie można zakończyć zadania: karta nie ma przypisanego brancha.",
+        en: "Cannot finish the task: the card has no branch assigned.",
+      },
+      {
+        pl: [
+          "Otwórz zadanie i ustaw nazwę brancha albo przenieś je najpierw do kolumny pracy, która tworzy branch.",
+          "Wypchnij zmiany na branch zadania.",
+          `Dopiero po scaleniu brancha do ${configuredProductionRef} przenieś zadanie na Produkcję.`,
+        ],
+        en: [
+          "Open the task and set a branch name, or move it to the work column that creates a branch first.",
+          "Push the task branch.",
+          `Move the task to Production only after the branch is merged into ${configuredProductionRef}.`,
+        ],
+      }
+    );
   }
 
   // 1. Working tree must be clean (if required).
   if (config.requireCleanWorkingTreeBeforeFinish && (await git.hasUncommittedChanges())) {
-    return {
-      ok: false,
-      action: "finishTask",
-      message: "You have uncommitted changes. Commit or stash them before finishing the task.",
-    };
+    return finishFailure(
+      config,
+      {
+        pl: "Nie można zakończyć zadania: masz niezacommitowane zmiany w working tree.",
+        en: "Cannot finish the task: the working tree has uncommitted changes.",
+      },
+      {
+        pl: [
+          "Sprawdź `git status`.",
+          "Zacommituj zmiany albo odłóż je świadomie przez `git stash`.",
+          "Spróbuj ponownie przenieść zadanie na Produkcję.",
+        ],
+        en: [
+          "Check `git status`.",
+          "Commit the changes or intentionally stash them with `git stash`.",
+          "Try moving the task to Production again.",
+        ],
+      }
+    );
   }
 
   // 2. Make sure we're on the task branch, creating it if it doesn't exist
@@ -1145,7 +1260,85 @@ export async function finishTaskGitFlow(
   if (current !== branch) {
     const checkout = await git.ensureBranch(branch);
     if (!checkout.ok) {
-      return { ok: false, action: "finishTask", message: checkout.message, detail: checkout.detail };
+      return finishFailure(
+        config,
+        {
+          pl: `Nie można przełączyć się na branch zadania '${branch}'.`,
+          en: `Cannot switch to the task branch '${branch}'.`,
+        },
+        {
+          pl: [
+            `Sprawdź, czy branch '${branch}' istnieje lokalnie albo na zdalnym repozytorium.`,
+            `Jeśli branch jest tylko zdalny, uruchom \`git fetch ${config.remoteName || "origin"} ${branch}\`.`,
+            "Popraw branch na karcie zadania i spróbuj ponownie.",
+          ],
+          en: [
+            `Check whether '${branch}' exists locally or on the remote.`,
+            `If it only exists remotely, run \`git fetch ${config.remoteName || "origin"} ${branch}\`.`,
+            "Fix the branch on the task card and try again.",
+          ],
+        },
+        checkout.detail
+      );
+    }
+  }
+
+  const main = await git.getMainBranch();
+  const remote = configuredRemote;
+
+  // Production really means merged into main. If BranchBoard is not allowed to
+  // do that merge, keep the task where it was and tell the user what to change.
+  if (!config.allowDirectMergeToMain) {
+    return finishFailure(
+      config,
+      {
+        pl: `Nie można przenieść zadania na Produkcję: automatyczny merge do '${main}' jest wyłączony.`,
+        en: `Cannot move the task to Production: automatic merge into '${main}' is disabled.`,
+      },
+      {
+        pl: [
+          "Włącz ustawienie `branchBoard.allowDirectMergeToMain`, jeśli BranchBoard ma scalać do main.",
+          `Albo scal '${branch}' ręcznie do '${remote}/${main}' poza BranchBoard.`,
+          `Zadanie można zakończyć dopiero po udanym merge i push do ${remote}/${main}.`,
+        ],
+        en: [
+          "Enable `branchBoard.allowDirectMergeToMain` if BranchBoard should merge into main.",
+          `Or merge '${branch}' manually into '${remote}/${main}' outside BranchBoard.`,
+          `The task can be finished only after a successful merge and push to ${remote}/${main}.`,
+        ],
+      }
+    );
+  }
+
+  // Direct merge IS allowed -> require explicit confirmation before running
+  // pre-finish commands, updating the branch, pushing, or touching main.
+  if (config.requireConfirmationBeforeMerge) {
+    const ok = await cb.confirm(
+      config.language === "en"
+        ? `Merge '${branch}' into '${main}' and push to ${remote}/${main}?`
+        : `Scalić '${branch}' do '${main}' i wypchnąć na ${remote}/${main}?`,
+      config.language === "en"
+        ? "The task will stay in its current column unless the merge and push complete successfully."
+        : "Zadanie zostanie w obecnej kolumnie, jeśli merge i push nie zakończą się sukcesem."
+    );
+    if (!ok) {
+      return finishFailure(
+        config,
+        {
+          pl: "Scalenie anulowane. Zadanie nie zostało przeniesione na Produkcję.",
+          en: "Merge cancelled. The task was not moved to Production.",
+        },
+        {
+          pl: [
+            "Uruchom finish ponownie, kiedy chcesz faktycznie scalić branch do main.",
+            `Zadanie można zakończyć dopiero po udanym merge i push do ${remote}/${main}.`,
+          ],
+          en: [
+            "Run finish again when you are ready to actually merge the branch into main.",
+            `The task can be finished only after a successful merge and push to ${remote}/${main}.`,
+          ],
+        }
+      );
     }
   }
 
@@ -1154,45 +1347,96 @@ export async function finishTaskGitFlow(
     cb.info(`Running: ${config.runCommandBeforeFinish}`);
     const res = await git.runCommand(config.runCommandBeforeFinish);
     if (!res.ok) {
-      return { ok: false, action: "finishTask", message: res.message, detail: res.detail };
+      return finishFailure(
+        config,
+        {
+          pl: "Komenda przed zakończeniem zadania nie powiodła się.",
+          en: "The pre-finish command failed.",
+        },
+        {
+          pl: [
+            `Uruchom lokalnie: \`${config.runCommandBeforeFinish}\`.`,
+            "Napraw błąd i upewnij się, że komenda kończy się kodem 0.",
+            "Dopiero potem spróbuj ponownie zakończyć zadanie.",
+          ],
+          en: [
+            `Run locally: \`${config.runCommandBeforeFinish}\`.`,
+            "Fix the failure and make sure the command exits with code 0.",
+            "Then try finishing the task again.",
+          ],
+        },
+        res.detail
+      );
     }
   }
 
-  // 4. Push the task branch.
+  // 4. Bring the task branch up to date with origin/main before publishing it.
+  // This catches conflicts on the feature branch instead of discovering them
+  // only after switching to main.
+  const updateFromMain = await git.updateBranchFromMain(config.updateBranchStrategy);
+  if (!updateFromMain.ok) {
+    return finishFailure(
+      config,
+      {
+        pl: `Nie udało się zaktualizować brancha '${branch}' z '${remote}/${main}'.`,
+        en: `Could not update '${branch}' from '${remote}/${main}'.`,
+      },
+      {
+        pl: [
+          `Przełącz się na branch: \`git checkout ${branch}\`.`,
+          `Pobierz main: \`git fetch ${remote} ${main}\`.`,
+          config.updateBranchStrategy === "rebase"
+            ? `Wykonaj rebase: \`git rebase ${remote}/${main}\`.`
+            : `Wykonaj merge: \`git merge ${remote}/${main}\`.`,
+          config.updateBranchStrategy === "rebase"
+            ? "Rozwiąż konflikty, uruchom `git rebase --continue` i wypchnij branch."
+            : "Rozwiąż konflikty, zacommituj merge i wypchnij branch.",
+          "Potem ponownie przenieś zadanie na Produkcję.",
+        ],
+        en: [
+          `Switch to the branch: \`git checkout ${branch}\`.`,
+          `Fetch main: \`git fetch ${remote} ${main}\`.`,
+          config.updateBranchStrategy === "rebase"
+            ? `Rebase: \`git rebase ${remote}/${main}\`.`
+            : `Merge: \`git merge ${remote}/${main}\`.`,
+          config.updateBranchStrategy === "rebase"
+            ? "Resolve conflicts, run `git rebase --continue`, and push the branch."
+            : "Resolve conflicts, commit the merge, and push the branch.",
+          "Then move the task to Production again.",
+        ],
+      },
+      updateFromMain.detail
+    );
+  }
+  cb.info(updateFromMain.message);
+
+  // 5. Push the task branch.
   const push = await git.pushBranch(branch);
   if (!push.ok) {
-    return { ok: false, action: "finishTask", message: push.message, detail: push.detail };
+    return finishFailure(
+      config,
+      {
+        pl: `Nie udało się wypchnąć brancha '${branch}'.`,
+        en: `Could not push branch '${branch}'.`,
+      },
+      {
+        pl: [
+          `Sprawdź połączenie i uprawnienia do remote '${remote}'.`,
+          `Uruchom ręcznie: \`git push -u ${remote} ${branch}\`.`,
+          "Po udanym push spróbuj ponownie zakończyć zadanie.",
+        ],
+        en: [
+          `Check your connection and permissions for remote '${remote}'.`,
+          `Run manually: \`git push -u ${remote} ${branch}\`.`,
+          "After a successful push, try finishing the task again.",
+        ],
+      },
+      push.detail
+    );
   }
   cb.info(push.message);
 
-  // 5. Branch on direct-merge policy.
-  if (!config.allowDirectMergeToMain) {
-    return {
-      ok: true,
-      action: "finishTask",
-      message: `Pushed '${branch}'. Direct merge to main is disabled — task moved for review.`,
-      moveToColumnId: "review",
-    };
-  }
-
-  // Direct merge IS allowed -> require explicit confirmation.
-  const main = await git.getMainBranch();
-  if (config.requireConfirmationBeforeMerge) {
-    const ok = await cb.confirm(
-      `Merge '${branch}' into '${main}' and push?`,
-      "This checks out main, pulls, merges, and pushes. The task branch will be merged into main."
-    );
-    if (!ok) {
-      return {
-        ok: true,
-        action: "finishTask",
-        message: "Merge cancelled. Branch was pushed; task moved for review.",
-        moveToColumnId: "review",
-      };
-    }
-  }
-
-  // 5b. Non-destructive safety nets before touching main.
+  // 6b. Non-destructive safety nets before touching main.
   if (config.createBackupBranchBeforeMerge) {
     const backup = SafetyService.backupBranchName(branch);
     const res = await git.createBackupBranch(backup, branch);
@@ -1204,33 +1448,110 @@ export async function finishTaskGitFlow(
     cb.info(res.ok ? `Safety tag created: ${tag}` : `Safety tag failed: ${res.detail ?? res.message}`);
   }
 
-  // 6. Checkout main, pull, merge, push.
+  // 7. Checkout main, fast-forward from origin/main, merge, push.
   const checkoutMain = await git.checkoutBranch(main);
   if (!checkoutMain.ok) {
-    return { ok: false, action: "finishTask", message: checkoutMain.message, detail: checkoutMain.detail };
+    return finishFailure(
+      config,
+      {
+        pl: `Nie udało się przełączyć na branch '${main}'.`,
+        en: `Could not switch to branch '${main}'.`,
+      },
+      {
+        pl: [
+          `Sprawdź, czy branch '${main}' istnieje lokalnie.`,
+          `Jeśli go nie ma, pobierz go z remote: \`git fetch ${remote} ${main}\`.`,
+          "Spróbuj ponownie po poprawnym checkout main.",
+        ],
+        en: [
+          `Check whether branch '${main}' exists locally.`,
+          `If it does not, fetch it from remote: \`git fetch ${remote} ${main}\`.`,
+          "Try again after main can be checked out.",
+        ],
+      },
+      checkoutMain.detail
+    );
   }
   const pull = await git.pullMain();
   if (!pull.ok) {
-    return { ok: false, action: "finishTask", message: pull.message, detail: pull.detail };
+    return finishFailure(
+      config,
+      {
+        pl: `Nie udało się zaktualizować '${main}' z '${remote}/${main}'.`,
+        en: `Could not update '${main}' from '${remote}/${main}'.`,
+      },
+      {
+        pl: [
+          `Uruchom: \`git checkout ${main}\`.`,
+          `Potem: \`git fetch ${remote} ${main}\` i \`git merge --ff-only ${remote}/${main}\`.`,
+          "Jeśli main ma lokalne zmiany albo remote jest dalej, rozwiąż to ręcznie i spróbuj ponownie.",
+        ],
+        en: [
+          `Run: \`git checkout ${main}\`.`,
+          `Then: \`git fetch ${remote} ${main}\` and \`git merge --ff-only ${remote}/${main}\`.`,
+          "If main has local changes or the remote is ahead, resolve that manually and try again.",
+        ],
+      },
+      pull.detail
+    );
   }
   const merge = await git.mergeBranchToMain(branch);
   if (!merge.ok) {
     // Conflict already aborted inside mergeBranchToMain. Do NOT delete branch.
-    return { ok: false, action: "finishTask", message: merge.message, detail: merge.detail };
+    return finishFailure(
+      config,
+      {
+        pl: `Nie udało się scalić '${branch}' do '${main}'. Zadanie nie zostało zakończone.`,
+        en: `Could not merge '${branch}' into '${main}'. The task was not finished.`,
+      },
+      {
+        pl: [
+          `Uruchom: \`git checkout ${main}\`.`,
+          `Upewnij się, że main jest aktualny: \`git fetch ${remote} ${main}\` i \`git merge --ff-only ${remote}/${main}\`.`,
+          `Spróbuj ręcznie: \`git merge ${branch}\`.`,
+          "Rozwiąż konflikty, zacommituj merge i wypchnij main.",
+          `Dopiero po udanym push do ${remote}/${main} przenieś zadanie na Produkcję.`,
+        ],
+        en: [
+          `Run: \`git checkout ${main}\`.`,
+          `Make sure main is current: \`git fetch ${remote} ${main}\` and \`git merge --ff-only ${remote}/${main}\`.`,
+          `Try manually: \`git merge ${branch}\`.`,
+          "Resolve conflicts, commit the merge, and push main.",
+          `Move the task to Production only after a successful push to ${remote}/${main}.`,
+        ],
+      },
+      merge.detail
+    );
   }
   cb.info(merge.message);
 
   const pushMain = await git.pushBranch(main);
   if (!pushMain.ok) {
-    return {
-      ok: false,
-      action: "finishTask",
-      message: `Merged locally but failed to push ${main}. Resolve manually; task not closed.`,
-      detail: pushMain.detail,
-    };
+    return finishFailure(
+      config,
+      {
+        pl: `Merge lokalny się udał, ale push '${main}' do '${remote}/${main}' nie powiódł się.`,
+        en: `The local merge succeeded, but pushing '${main}' to '${remote}/${main}' failed.`,
+      },
+      {
+        pl: [
+          `Jesteś po lokalnym merge. Sprawdź: \`git checkout ${main}\` i \`git status\`.`,
+          `Spróbuj wypchnąć main: \`git push ${remote} ${main}\`.`,
+          "Jeśli push jest odrzucony, pobierz najnowszy main, rozwiąż rozjazd i wypchnij ponownie.",
+          `Zadanie pozostaje nieukończone, dopóki push do ${remote}/${main} się nie uda.`,
+        ],
+        en: [
+          `The local merge already happened. Check: \`git checkout ${main}\` and \`git status\`.`,
+          `Try pushing main: \`git push ${remote} ${main}\`.`,
+          "If the push is rejected, fetch the latest main, resolve the divergence, and push again.",
+          `The task remains unfinished until the push to ${remote}/${main} succeeds.`,
+        ],
+      },
+      pushMain.detail
+    );
   }
 
-  // 7. Optional branch cleanup (only after a fully successful merge+push).
+  // 8. Optional branch cleanup (only after a fully successful merge+push).
   if (config.deleteLocalBranchAfterMerge) {
     const del = await git.deleteLocalBranch(branch);
     cb.info(del.message);
@@ -1243,7 +1564,10 @@ export async function finishTaskGitFlow(
   return {
     ok: true,
     action: "finishTask",
-    message: `Task finished: '${branch}' merged into ${main}.`,
+    message:
+      config.language === "en"
+        ? `Task finished: '${branch}' was merged and pushed to ${remote}/${main}.`
+        : `Zadanie zakończone: '${branch}' scalono i wypchnięto do ${remote}/${main}.`,
     moveToColumnId: "done",
     markDone: true,
   };

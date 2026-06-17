@@ -6,10 +6,11 @@ interface Props {
   items: ChecklistItem[];
   onChange: (items: ChecklistItem[]) => void;
   titleKey?: string;
+  titleLabel?: string;
 }
 
 /** Reusable checklist (progress + toggle/remove + add). Used in TaskDrawer and Current Branch. */
-export function Checklist({ items, onChange, titleKey = "task.checklist" }: Props) {
+export function Checklist({ items, onChange, titleKey = "task.checklist", titleLabel }: Props) {
   const [newItem, setNewItem] = useState("");
   const done = items.filter((i) => i.done).length;
   const progress = items.length ? Math.round((done / items.length) * 100) : 0;
@@ -28,7 +29,7 @@ export function Checklist({ items, onChange, titleKey = "task.checklist" }: Prop
   return (
     <div className="bb-section">
       <div className="bb-section-title">
-        {t(titleKey)} {items.length > 0 ? `(${done}/${items.length})` : ""}
+        {titleLabel ?? t(titleKey)} {items.length > 0 ? `(${done}/${items.length})` : ""}
       </div>
       {items.length > 0 && (
         <div className="bb-progress">
