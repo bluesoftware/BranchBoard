@@ -4,6 +4,15 @@
     "tagline": "One task. One branch. One workflow.",
     "loading": "Loading BranchBoard…"
   },
+  "adminAnnouncement": {
+    "release": {
+      "title": "New BranchBoard version: SQL, sync, and admin announcements",
+      "message": "Please read this short summary before updating. BranchBoard data is being moved from one large JSON record into SQLite tables, so the board should stay faster and more stable as the number of tasks grows. We are also enabling better sync between users and visible admin announcements, so everyone knows when a new version should be installed.",
+      "changes": "Existing data is migrated into SQLite tables without losing current work. The board should perform better with many tasks, comments, and subtasks. Changes are synchronized more reliably between users connected to the same database. Admins can show a clear update alert with a download link.",
+      "tutorial": "How to use it: download and install the new BranchBoard version, open the board and wait for the migration, read the admin announcement, and ideally update all workstations on the same day.",
+      "linkLabel": "Download the new version"
+    }
+  },
   "topBar": {
     "myTasks": "My tasks",
     "allTasks": "All tasks",
@@ -28,7 +37,8 @@
     "storageLocal": "Local JSON",
     "storageServer": "Server",
     "redetectUser": "Re-detect Git user",
-    "importUsers": "Import users from Git"
+    "importUsers": "Import users from Git",
+    "userFilterAll": "Everyone"
   },
   "board": {
     "emptyColumn": "No tasks yet",
@@ -36,6 +46,13 @@
     "addTask": "Add task",
     "taskName": "Task name",
     "cancel": "Cancel"
+  },
+  "quickAdd": {
+    "fabTitle": "Add new task",
+    "title": "New task",
+    "titleLabel": "Task title",
+    "requiredHint": "A title is required to save the task.",
+    "columnLabel": "Column"
   },
   "column": {
     "rename": "Rename",
@@ -103,7 +120,9 @@
     "finishHint": "Push branch and move this task forward safely.",
     "createBranch": "Create branch",
     "checkoutBranch": "Checkout branch",
+    "checkoutShort": "Switch",
     "pushBranch": "Push branch",
+    "updateFromMain": "Align to main",
     "mergeToMain": "Merge to main",
     "copyAiPrompt": "Copy AI Prompt",
     "copyAiPromptHint": "Use this prompt in Cursor, Claude or Copilot Chat.",
@@ -135,6 +154,12 @@
     "onThisBranch": "You are on this branch.",
     "branchDiffers": "Current branch differs from the task branch.",
     "uncommitted": "You have uncommitted changes.",
+    "production": {
+      "productionServerRollback": "On the production server with local SQLite, tasks cannot be moved back from Production. Move them from a local SSH client instead; BranchBoard will switch to the task branch there.",
+      "productionChecklistIncomplete": "A task cannot be moved to Production until all subtasks are done.",
+      "productionRequiresChecklist": "Production is available only after all subtasks are done.",
+      "checklistLocked": "Subtasks are locked in the Production column."
+    },
     "lastCommit": "Last commit",
     "history": "History",
     "created": "Created",
@@ -156,6 +181,7 @@
     "aiModelPlaceholder": "e.g. Claude, GPT-4, Copilot…",
     "aiChecklist": "AI review checklist",
     "aiAddChecklist": "Add AI review checklist",
+    "fileMentionSuggestions": "File suggestions",
     "files": {
       "title": "Changed files (branch)",
       "loading": "Loading branch files…",
@@ -165,8 +191,6 @@
     },
     "context": "Work & history",
     "details": "Details",
-    "attachedFiles": "Task files",
-    "attachPlaceholder": "Add a file path (start typing for suggestions)…",
     "acceptance": "Acceptance criteria",
     "acceptancePlaceholder": "One criterion per line — when is the task considered done…",
     "help": {
@@ -195,14 +219,15 @@
       "aiModel": "Which model/agent did the work (e.g. Claude, GPT-4).",
       "aiChecklist": "A checklist to verify AI-generated changes.",
       "checklist": "Sub-tasks. They also build the acceptance criteria in the AI prompt.",
-      "comments": "Team conversation about the task.",
-      "attachedFiles": "Project files this task touches (to edit / inspect). They go into the AI prompt and open with one click."
+      "comments": "Team conversation about the task."
     },
     "tip": {
       "createBranch": "Create a branch from this task and switch to it.",
       "checkout": "Switch the repository to this task's branch.",
+      "checkoutPublic": "Switch to this task branch. If it is not local, BranchBoard fetches it from {remote}; if it has not been pushed publicly, you will see a message.",
       "push": "Push the branch to the remote.",
       "copyBranch": "Copy the branch name to the clipboard.",
+      "updateFromMain": "Switch to this task's branch and align it with origin/main: fetches the latest changes from the server and updates the branch. If there is a conflict, the operation is safely aborted and BranchBoard shows the list of files that need manual merging.",
       "merge": "Merge the branch into main (with confirmation and backup).",
       "deployDev": "Run the DEV deploy command for this branch.",
       "openDev": "Open the DEV environment URL in the browser.",
@@ -367,7 +392,7 @@
     "aiFlag": "AI-assisted task",
     "overdueShort": "{days}d overdue",
     "today": "today",
-    "attachedFiles": "Attached files: {count}"
+    "unreadComments": "Unread chat messages"
   },
   "priority": {
     "none": "None",
@@ -383,6 +408,14 @@
     "chore": "Chore",
     "refactor": "Refactor",
     "docs": "Docs"
+  },
+  "taskTypeShort": {
+    "feature": "FEATURE",
+    "bugfix": "BUG",
+    "hotfix": "HOTFIX",
+    "chore": "CHORE",
+    "refactor": "REFACTOR",
+    "docs": "DOCS"
   },
   "git": {
     "noRepo": "Open a Git repository to use BranchBoard Git features.",

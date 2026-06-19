@@ -13,6 +13,18 @@ export const en: ExtMessages = {
   taskTitlePrompt: "Task title",
   selectTaskBranch: "Select a task branch to checkout",
   noGitRepo: "BranchBoard: no Git repository in this workspace.",
+  branchNotPushedPublic:
+    "This task does not have a publicly pushed branch on {remote} yet. Push the branch first.",
+  productionRollbackLocked:
+    "On the production server with local SQLite, tasks cannot be moved back from Production. Move them from a local SSH client.",
+  productionChecklistIncomplete:
+    "A task cannot be moved to Production until all subtasks are done.",
+  productionChecklistLocked:
+    "Subtasks are locked in the Production column and cannot be edited.",
+  productionRollbackNeedsBranch:
+    "To move a task back from Production, the task must have a linked branch.",
+  productionRollbackRecreated:
+    "Branch '{branch}' no longer existed locally or on {remote}, so it was recreated from the current '{main}' — work can resume on it. Nothing on {remote}/{main} was deleted.",
   usersImported: "BranchBoard: imported {count} user(s) from Git.",
   usersUpToDate: "BranchBoard: users are up to date with Git.",
   userSyncFailed: "BranchBoard: user sync failed — {error}",
@@ -54,4 +66,5 @@ export const en: ExtMessages = {
   notifTaskMovedToReviewBody: '"{title}" moved to review/testing.',
   notifTaskDoneTitle: "Task done",
   notifTaskDoneBody: '"{title}" was marked as done.',
+  notifOpenTaskAction: "Open task",
 };

@@ -51,7 +51,7 @@ export class DashboardService {
     const id = (col.id || "").toLowerCase();
     const name = (col.name || "").toLowerCase();
     const hay = `${id} ${name}`;
-    if (id === "done" || /zrobione|gotowe|\bdone\b|ukończ|ukoncz/.test(hay)) {
+    if (col.gitStage === "production" || id === "done" || /zrobione|gotowe|\bdone\b|ukończ|ukoncz|produkc/.test(hay)) {
       return "done";
     }
     if (/block|zablokow|wstrzym/.test(hay)) {

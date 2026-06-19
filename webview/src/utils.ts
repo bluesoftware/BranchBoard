@@ -210,6 +210,17 @@ function bullets(lines: string[], emptyText: string): string {
   return filtered.map((l) => `- ${l}`).join("\n");
 }
 
+function extractMentionedFiles(text: string): string[] {
+  const files = new Set<string>();
+  for (const match of text.matchAll(/(^|\s)@([A-Za-z0-9._/-]+)/g)) {
+    const filePath = (match[2] ?? "").replace(/[),.;!?]+$/, "");
+    if (filePath.includes("/") || /\.[A-Za-z0-9]{1,12}$/.test(filePath)) {
+      files.add(filePath);
+    }
+  }
+  return [...files];
+}
+
 /**
  * Render an AI coding prompt for a task by filling the template variables.
  * Acceptance criteria are derived from the checklist when present.
@@ -234,14 +245,14 @@ export function buildAiPrompt(opts: {
           none: "(none)",
           noDesc: "(no description)",
           accept: "- (define acceptance criteria)",
-          files: "(none specified — let the AI find them, or attach files to the task)",
+          files: "(none specified — mention files in the description with @path/to/file)",
           cmd: "(none configured)",
         }
       : {
           none: "(brak)",
           noDesc: "(brak opisu)",
           accept: "- (uzupełnij kryteria akceptacji)",
-          files: "(nie wskazano — znajdź właściwe pliki lub podepnij je do zadania)",
+          files: "(nie wskazano — oznacz pliki w opisie przez @ścieżka/do/pliku)",
           cmd: "(brak)",
         };
 
@@ -256,7 +267,8 @@ export function buildAiPrompt(opts: {
     explicitAcceptance.length > 0
       ? explicitAcceptance
       : task.checklist.filter((c) => !c.done).map((c) => c.text);
-  const fileLines = (task.attachedFiles ?? []).map((f) => f);
+  const description = richTextToPlainText(task.description);
+  const fileLines = [...new Set([...extractMentionedFiles(description), ...(task.attachedFiles ?? [])])];
   const commentLines = task.comments.map((c) => {
     const author = users.find((u) => u.id === c.authorId)?.name ?? "Unknown";
     return `${author}: ${c.text}`;
@@ -269,7 +281,7 @@ export function buildAiPrompt(opts: {
     title: task.title || "(untitled)",
     command_pl: cmd ? ` (uruchom: ${cmd})` : "",
     command_en: cmd ? ` (run: ${cmd})` : "",
-    description: richTextToPlainText(task.description) || e.noDesc,
+    description: description || e.noDesc,
     acceptance: bullets(acceptanceLines, e.accept),
     files: bullets(fileLines, e.files),
     checklist: bullets(checklistLines, e.none),

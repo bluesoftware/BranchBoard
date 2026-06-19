@@ -83,6 +83,43 @@ export class NotificationService {
     return changed;
   }
 
+  /**
+   * Mark every "comment_added" notification for a specific task as read by a
+   * user. Used when the user opens a task's chat — clears the green
+   * unread-comment indicator on the Kanban card. Returns the count changed.
+   */
+  static markTaskCommentsRead(board: BoardData, taskId: string, userId: string): number {
+    let changed = 0;
+    for (const record of board.notifications ?? []) {
+      if (
+        record.type === "comment_added" &&
+        record.taskId === taskId &&
+        record.recipientUserIds.includes(userId) &&
+        !record.readBy.includes(userId)
+      ) {
+        record.readBy.push(userId);
+        changed++;
+      }
+    }
+    return changed;
+  }
+
+  /** Task ids that have at least one unread "comment_added" notification for the given user. */
+  static unreadCommentTaskIds(board: BoardData, userId: string): Set<string> {
+    const ids = new Set<string>();
+    for (const record of board.notifications ?? []) {
+      if (
+        record.type === "comment_added" &&
+        record.taskId &&
+        record.recipientUserIds.includes(userId) &&
+        !record.readBy.includes(userId)
+      ) {
+        ids.add(record.taskId);
+      }
+    }
+    return ids;
+  }
+
   /** Every board user except the given actor — the default "notify everyone else" recipient set. */
   static everyoneExcept(board: BoardData, actorUserId: string | null): string[] {
     return board.users.map((u) => u.id).filter((id) => id !== actorUserId);

@@ -195,7 +195,8 @@ export type NotificationType =
   | "merge_finished"
   | "merge_failed"
   | "task_moved_to_review"
-  | "task_done";
+  | "task_done"
+  | "admin_announcement";
 
 /**
  * A persisted notification entry, stored on the board so every user has a
@@ -216,6 +217,22 @@ export interface BoardNotificationRecord {
   title: string;
   message: string;
   createdAt: string;
+}
+
+export type AdminAnnouncementSeverity = "info" | "warning" | "critical";
+
+export interface BoardAdminAnnouncement {
+  id: string;
+  title: string;
+  message: string;
+  severity: AdminAnnouncementSeverity;
+  linkUrl: string;
+  linkLabel: string;
+  createdAt: string;
+  updatedAt: string;
+  createdByUserId: string | null;
+  readBy: string[];
+  active: boolean;
 }
 
 export type DeploymentEnvironment = "dev" | "staging" | "production";
@@ -250,6 +267,8 @@ export interface BoardData {
   deployments: Deployment[];
   /** Persisted, per-user notifications (capped, newest last). */
   notifications: BoardNotificationRecord[];
+  /** High-visibility admin/build announcements synced through the board database. */
+  announcements: BoardAdminAnnouncement[];
   /** Bumped on every save so external watchers can detect change ordering. */
   updatedAt?: string;
 }
@@ -565,6 +584,7 @@ export interface BranchBoardConfig {
   confirmGitActionsOnMove: boolean;
   appearance: AppearanceConfig;
   notifications: NotificationSettings;
+  adminAnnouncement: AdminAnnouncementConfig;
 }
 
 /** UI appearance toggles, mirrored to the webview. */
@@ -596,6 +616,16 @@ export interface NotificationSettings {
   soundId: string;
 }
 
+export interface AdminAnnouncementConfig {
+  enabled: boolean;
+  id: string;
+  title: string;
+  message: string;
+  linkUrl: string;
+  linkLabel: string;
+  severity: AdminAnnouncementSeverity;
+}
+
 /** Built-in notification sound files, bundled locally (no CDN). */
 export const NOTIFICATION_SOUND_IDS = ["mail-alert", "bells", "double-beep"] as const;
 export type NotificationSoundId = (typeof NOTIFICATION_SOUND_IDS)[number];
@@ -618,6 +648,7 @@ export interface AppConfig {
   };
   appearance: AppearanceConfig;
   notifications: NotificationSettings;
+  adminAnnouncement: AdminAnnouncementConfig;
   /** webview-resolved URIs for the bundled notification sounds, keyed by id. */
   soundFiles: Record<string, string>;
   policy: {
@@ -716,6 +747,8 @@ export type InboundMessageType =
   | "logEvent"
   | "markNotificationRead"
   | "markAllNotificationsRead"
+  | "markTaskCommentsRead"
+  | "markAnnouncementRead"
   | "refresh";
 
 export interface InboundMessage {

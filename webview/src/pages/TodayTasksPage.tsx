@@ -8,7 +8,7 @@ import { PageHeader } from "../components/layout/PageHeader";
 import { EmptyState } from "../components/common/EmptyState";
 import { HelpIcon } from "../components/common/HelpIcon";
 import { PriorityBadge } from "../components/TaskCard";
-import { BranchIcon, CalendarIcon, CommentIcon, FileIcon, SparkleIcon } from "../components/Icons";
+import { BranchIcon, CalendarIcon, CommentIcon, SparkleIcon } from "../components/Icons";
 
 type RangeMode = "today" | "next3" | "week" | "custom";
 type Scope = "mine" | "all";
@@ -114,7 +114,6 @@ function TodayRow({
   const due = dueChipFor(task);
   const checklistTotal = task.checklist.length;
   const checklistDone = task.checklist.filter((c) => c.done).length;
-  const attachedCount = task.attachedFiles?.length ?? 0;
   const isAi = !!task.ai?.createdByAi;
   const { appearance } = appConfig;
   const descriptionPreview = richTextToPlainText(task.description);
@@ -151,12 +150,6 @@ function TodayRow({
             <span className={`bb-flag due ${due.tone}`} title={due.title}>
               <CalendarIcon size={11} />
               {due.label}
-            </span>
-          )}
-          {attachedCount > 0 && (
-            <span className="bb-meta-item" title={t("card.attachedFiles", { count: attachedCount })}>
-              <FileIcon size={11} />
-              {attachedCount}
             </span>
           )}
           {appearance.showChecklist && checklistTotal > 0 && (

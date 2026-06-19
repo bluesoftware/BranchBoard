@@ -1,14 +1,38 @@
-import { AppConfig, BoardTask, BoardUser, GitInfo, TaskPriority } from "../types";
+import { AppConfig, BoardTask, BoardUser, GitInfo, TaskPriority, TaskType } from "../types";
 import { t } from "../i18n";
 import { daysOverdue } from "../utils";
 import { richTextToPlainText } from "../richText";
-import { BranchIcon, CalendarIcon, CommentIcon, FileIcon, SparkleIcon } from "./Icons";
+import { BranchIcon, CalendarIcon, CommentIcon, SparkleIcon } from "./Icons";
+
+/** Distinct accent color per task type, used by the small type badge on each card. */
+const TASK_TYPE_COLORS: Record<TaskType, string> = {
+  feature: "#38bdf8",
+  bugfix: "#f87171",
+  hotfix: "#ef4444",
+  chore: "#94a3b8",
+  refactor: "#a78bfa",
+  docs: "#34d399",
+};
+
+export function TaskTypeBadge({ type }: { type: TaskType }) {
+  const color = TASK_TYPE_COLORS[type] ?? TASK_TYPE_COLORS.feature;
+  return (
+    <span
+      className="bb-type-badge"
+      style={{ color, borderColor: color, background: `${color}22` }}
+      title={t(`taskType.${type}`)}
+    >
+      {t(`taskTypeShort.${type}`)}
+    </span>
+  );
+}
 
 interface Props {
   task: BoardTask;
   users: BoardUser[];
   appConfig: AppConfig;
   git: GitInfo | null;
+  hasUnreadComments?: boolean;
   onOpen: () => void;
   onToggleDone: () => void;
   onDragStart: () => void;
@@ -32,6 +56,7 @@ export function TaskCard({
   users,
   appConfig,
   git,
+  hasUnreadComments,
   onOpen,
   onToggleDone,
   onDragStart,
@@ -45,7 +70,6 @@ export function TaskCard({
   const hasBranch = !!task.branchName;
   const isCurrentBranch = !!git?.currentBranch && git.currentBranch === task.branchName;
   const isAi = !!task.ai?.createdByAi;
-  const attachedCount = task.attachedFiles?.length ?? 0;
   const overdue = isDone ? null : daysOverdue(task.dueDate);
   const descriptionPreview = richTextToPlainText(task.description);
 
@@ -125,12 +149,6 @@ export function TaskCard({
       <div className="bb-task-card-bottom">
         <div className="bb-task-card-meta">
           {appearance.showPriority && <PriorityBadge priority={task.priority} />}
-          {attachedCount > 0 && (
-            <span className="bb-meta-item" title={t("card.attachedFiles", { count: attachedCount })}>
-              <FileIcon size={11} />
-              {attachedCount}
-            </span>
-          )}
           {appearance.showBranchBadges && hasBranch && (
             <span className={`bb-meta-item branch ${isCurrentBranch ? "current" : ""}`} title={task.branchName}>
               <BranchIcon size={11} />
@@ -143,18 +161,24 @@ export function TaskCard({
             </span>
           )}
           {appearance.showComments && task.comments.length > 0 && (
-            <span className="bb-meta-item">
+            <span
+              className={`bb-meta-item ${hasUnreadComments ? "unread-comments" : ""}`}
+              title={hasUnreadComments ? t("card.unreadComments") : undefined}
+            >
               <CommentIcon size={12} />
               {task.comments.length}
             </span>
           )}
         </div>
 
-        {appearance.showAvatars && assignee && (
-          <span className="bb-avatar" style={{ background: assignee.color }} title={assignee.name}>
-            {assignee.avatarText}
-          </span>
-        )}
+        <div className="bb-task-card-right">
+          <TaskTypeBadge type={task.taskType ?? "feature"} />
+          {appearance.showAvatars && assignee && (
+            <span className="bb-avatar" style={{ background: assignee.color }} title={assignee.name}>
+              {assignee.avatarText}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

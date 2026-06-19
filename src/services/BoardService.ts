@@ -8,10 +8,12 @@ import {
   BoardEventType,
   BoardNotificationRecord,
   NotificationType,
+  AdminAnnouncementConfig,
 } from "../types";
-import { StorageProvider } from "./StorageProvider";
+import { StorageProvider, MAX_STORED_ANNOUNCEMENTS, MAX_STORED_NOTIFICATIONS } from "./StorageProvider";
 import { EventService } from "./EventService";
 import { NotificationService } from "./NotificationService";
+import { Logger } from "./Logger";
 
 export interface BoardNotification {
   message: string;
@@ -26,6 +28,10 @@ export class BoardService {
   private board: BoardData | undefined;
   private boardListeners: Array<(board: BoardData) => void> = [];
   private notificationListeners: Array<(n: BoardNotification) => void> = [];
+  /** Fired when a persisted notification record addressed to the current user
+   *  arrives via an external board change (poll/file-watch on a DIFFERENT
+   *  machine than the one that performed the action) — see applyExternal(). */
+  private externalRecordListeners: Array<(record: BoardNotificationRecord) => void> = [];
   private disposeExternal: (() => void) | undefined;
 
   constructor(private storage: StorageProvider) {}
@@ -43,6 +49,14 @@ export class BoardService {
     board.events = Array.isArray(board.events) ? board.events : [];
     board.deployments = Array.isArray(board.deployments) ? board.deployments : [];
     board.notifications = Array.isArray(board.notifications) ? board.notifications : [];
+    board.announcements = (Array.isArray(board.announcements) ? board.announcements : []).map((a) => ({
+      ...a,
+      severity: a.severity ?? "info",
+      linkUrl: a.linkUrl ?? "",
+      linkLabel: a.linkLabel ?? "",
+      readBy: Array.isArray(a.readBy) ? a.readBy : [],
+      active: a.active ?? true,
+    }));
     return board;
   }
 
@@ -99,6 +113,20 @@ export class BoardService {
     this.notificationListeners.push(listener);
     return () => {
       this.notificationListeners = this.notificationListeners.filter((l) => l !== listener);
+    };
+  }
+
+  /**
+   * Subscribe to persisted notification records that this user only learns
+   * about via an external board change (i.e. someone else's machine created
+   * the record; this machine picked it up through its poll/file-watcher).
+   * Lets the panel mirror it as a native VS Code toast on the recipient's
+   * own window, the same way `notify()` does for locally-triggered actions.
+   */
+  onExternalNotificationRecord(listener: (record: BoardNotificationRecord) => void): () => void {
+    this.externalRecordListeners.push(listener);
+    return () => {
+      this.externalRecordListeners = this.externalRecordListeners.filter((l) => l !== listener);
     };
   }
 
@@ -159,8 +187,35 @@ export class BoardService {
     this.board = incoming;
     if (previous) {
       this.raiseExternalNotifications(previous, incoming, this.currentUserId);
+      this.raiseExternalNotificationRecords(previous, incoming, this.currentUserId);
     }
     this.emitBoard();
+  }
+
+  /**
+   * Persisted notifications (board.notifications, written by addNotification
+   * on whichever machine performed the action) sync like any other board
+   * data. When a poll/file-watch on THIS machine picks up new records meant
+   * for the current user, surface them through onExternalNotificationRecord
+   * so the panel can show a native toast — mirroring what notify() already
+   * does for the machine that performed the action itself.
+   */
+  private raiseExternalNotificationRecords(prev: BoardData, next: BoardData, currentUserId?: string) {
+    if (!currentUserId || this.externalRecordListeners.length === 0) {
+      return;
+    }
+    const prevIds = new Set((prev.notifications ?? []).map((n) => n.id));
+    const newRecords = (next.notifications ?? []).filter(
+      (n) => !prevIds.has(n.id) && n.recipientUserIds.includes(currentUserId)
+    );
+    for (const record of newRecords) {
+      Logger.debug(
+        `raiseExternalNotificationRecords(${record.type}): new record for ${currentUserId} arrived via external sync — "${record.message}"`
+      );
+      for (const l of this.externalRecordListeners) {
+        l(record);
+      }
+    }
   }
 
   /**
@@ -313,6 +368,113 @@ export class BoardService {
     }
   }
 
+  /** Clears the unread-comment indicator for one task once the user has opened its chat. */
+  async markTaskCommentsRead(taskId: string, userId: string): Promise<void> {
+    const board = this.getBoard();
+    if (NotificationService.markTaskCommentsRead(board, taskId, userId) > 0) {
+      await this.persist();
+    }
+  }
+
+  /* ---------------- Admin announcements ---------------- */
+
+  async syncAdminAnnouncement(config: AdminAnnouncementConfig, actorUserId?: string | null): Promise<void> {
+    if (!config.enabled || !config.id.trim() || !config.title.trim() || !config.message.trim()) {
+      return;
+    }
+    const board = this.getBoard();
+    board.announcements = Array.isArray(board.announcements) ? board.announcements : [];
+    const now = this.now();
+    const id = config.id.trim();
+    const existing = board.announcements.find((a) => a.id === id);
+    const next = {
+      id,
+      title: config.title.trim(),
+      message: config.message.trim(),
+      severity: config.severity,
+      linkUrl: config.linkUrl.trim(),
+      linkLabel: config.linkLabel.trim(),
+      active: true,
+    };
+
+    if (existing) {
+      const changed =
+        existing.title !== next.title ||
+        existing.message !== next.message ||
+        existing.severity !== next.severity ||
+        existing.linkUrl !== next.linkUrl ||
+        existing.linkLabel !== next.linkLabel ||
+        existing.active !== true;
+      if (!changed) {
+        return;
+      }
+      Object.assign(existing, next, {
+        updatedAt: now,
+        createdByUserId: actorUserId ?? existing.createdByUserId ?? null,
+        readBy: [],
+      });
+    } else {
+      board.announcements.push({
+        ...next,
+        createdAt: now,
+        updatedAt: now,
+        createdByUserId: actorUserId ?? null,
+        readBy: [],
+      });
+    }
+
+    const notificationId = `admin_nt_${id}`;
+    const recipientUserIds = board.users.map((user) => user.id);
+    const existingNotification = (board.notifications ?? []).find((n) => n.id === notificationId);
+    const notificationPayload: BoardNotificationRecord = {
+      id: notificationId,
+      type: "admin_announcement",
+      taskId: null,
+      branchName: null,
+      actorUserId: actorUserId ?? null,
+      recipientUserIds,
+      readBy: [],
+      title: next.title,
+      message: next.linkUrl ? `${next.message}\n${next.linkUrl}` : next.message,
+      createdAt: existingNotification?.createdAt ?? now,
+    };
+    if (existingNotification) {
+      const changed =
+        existingNotification.title !== notificationPayload.title ||
+        existingNotification.message !== notificationPayload.message ||
+        existingNotification.recipientUserIds.join("|") !== recipientUserIds.join("|");
+      if (changed) {
+        Object.assign(existingNotification, notificationPayload);
+      }
+    } else if (recipientUserIds.length > 0) {
+      board.notifications.push(notificationPayload);
+    }
+    if (board.notifications.length > MAX_STORED_NOTIFICATIONS) {
+      board.notifications.splice(0, board.notifications.length - MAX_STORED_NOTIFICATIONS);
+    }
+
+    board.announcements.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (board.announcements.length > MAX_STORED_ANNOUNCEMENTS) {
+      board.announcements.splice(0, board.announcements.length - MAX_STORED_ANNOUNCEMENTS);
+    }
+    await this.persist();
+  }
+
+  async markAnnouncementRead(announcementId: string, userId: string): Promise<void> {
+    const board = this.getBoard();
+    const announcement = (board.announcements ?? []).find((a) => a.id === announcementId);
+    if (!announcement || announcement.readBy.includes(userId)) {
+      return;
+    }
+    announcement.readBy.push(userId);
+    announcement.updatedAt = this.now();
+    const notification = (board.notifications ?? []).find((n) => n.id === `admin_nt_${announcementId}`);
+    if (notification && notification.recipientUserIds.includes(userId) && !notification.readBy.includes(userId)) {
+      notification.readBy.push(userId);
+    }
+    await this.persist();
+  }
+
   /* ---------------- Deployments ---------------- */
 
   /** Insert or replace a deployment record (matched by id), then persist. */
@@ -441,7 +603,11 @@ export class BoardService {
     const destCol = board.columns.find((c) => c.id === toColumnId);
     const fromCol = board.columns.find((c) => c.id === fromColumnId);
     const enteringDone =
-      !!destCol && (destCol.id === "done" || /zrobione|done/i.test(destCol.name));
+      !!destCol && (
+        destCol.gitStage === "production" ||
+        destCol.id === "done" ||
+        /zrobione|done|produkc/i.test(destCol.name)
+      );
     if (enteringDone) {
       task.status = "done";
       task.finishedAt = task.finishedAt ?? this.now();
@@ -761,13 +927,17 @@ export class BoardService {
     if (review) {
       return review.id;
     }
-    const done = board.columns.find((c) => c.id === "done" || /zrobione|done/i.test(c.name));
+    const done = board.columns.find((c) =>
+      c.gitStage === "production" || c.id === "done" || /zrobione|done|produkc/i.test(c.name)
+    );
     return done?.id ?? board.columns[board.columns.length - 1]?.id ?? "done";
   }
 
   findDoneColumnId(): string {
     const board = this.getBoard();
-    const done = board.columns.find((c) => c.id === "done" || /zrobione|done/i.test(c.name));
+    const done = board.columns.find((c) =>
+      c.gitStage === "production" || c.id === "done" || /zrobione|done|produkc/i.test(c.name)
+    );
     return done?.id ?? board.columns[board.columns.length - 1]?.id ?? "done";
   }
 

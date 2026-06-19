@@ -21,7 +21,7 @@ const RICH_TEXT_PURIFY_CONFIG = {
     "ul",
   ],
   ALLOWED_ATTR: ["href", "rel", "target"],
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|branchboard-file):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
 };
 
 function escapeHtml(value: string): string {

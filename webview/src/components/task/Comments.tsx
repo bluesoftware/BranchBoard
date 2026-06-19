@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
+import type { FormEvent } from "react";
 import type { BoardTask, BoardUser, TaskComment } from "../../types";
 import { t } from "../../i18n";
 import { formatDate } from "../../utils";
+import { FileMentionInput, type FileMentionInputHandle } from "./FileMentionInput";
+import { renderTextWithFileMentions } from "../../fileMentionDisplay";
 
 interface Props {
   comments: TaskComment[];
@@ -10,6 +12,9 @@ interface Props {
   task?: Pick<BoardTask, "assignedUserId" | "createdByUserId">;
   currentUserId: string | null;
   onAdd: (text: string) => void;
+  fileSuggestions?: string[];
+  onSearchFiles?: (query: string) => void;
+  onOpenFile?: (path: string) => void;
 }
 
 function Avatar({ user, fallback = "?" }: { user?: BoardUser; fallback?: string }) {
@@ -29,10 +34,19 @@ function Avatar({ user, fallback = "?" }: { user?: BoardUser; fallback?: string 
   );
 }
 
-export function Comments({ comments, users, task, currentUserId, onAdd }: Props) {
+export function Comments({
+  comments,
+  users,
+  task,
+  currentUserId,
+  onAdd,
+  fileSuggestions = [],
+  onSearchFiles = () => {},
+  onOpenFile,
+}: Props) {
   const [message, setMessage] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<FileMentionInputHandle>(null);
 
   const currentUser = users.find((u) => u.id === currentUserId);
   const participants = useMemo(() => {
@@ -71,13 +85,6 @@ export function Comments({ comments, users, task, currentUserId, onAdd }: Props)
     onAdd(text);
     setMessage("");
     requestAnimationFrame(() => inputRef.current?.focus());
-  };
-
-  const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      submit();
-    }
   };
 
   return (
@@ -120,24 +127,33 @@ export function Comments({ comments, users, task, currentUserId, onAdd }: Props)
                   <strong>{isOwn ? t("topBar.you") : author?.name ?? "Unknown"}</strong>
                   <span className="bb-muted small">{formatDate(c.createdAt)}</span>
                 </div>
-                <div className="bb-comment-bubble">{c.text}</div>
+                <div className="bb-comment-bubble">{renderTextWithFileMentions(c.text, onOpenFile)}</div>
               </div>
             </div>
           );
         })}
       </div>
-      <form className="bb-chat-composer" onSubmit={submit}>
+      <form
+        className="bb-chat-composer"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
         <Avatar user={currentUser ?? undefined} fallback={t("topBar.you").slice(0, 1)} />
-        <textarea
+        <FileMentionInput
           ref={inputRef}
+          multiline
+          autoGrow
           className="bb-chat-input"
-          rows={1}
           value={message}
           placeholder={t("task.commentPlaceholder")}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={onComposerKeyDown}
+          fileSuggestions={fileSuggestions}
+          onSearchFiles={onSearchFiles}
+          onChange={setMessage}
+          onEnter={submit}
         />
-        <button className="bb-chat-send" disabled={!message.trim()} type="submit">
+        <button className="bb-chat-send" disabled={!message.trim()} type="button" onClick={() => submit()}>
           {t("task.comment")}
         </button>
       </form>

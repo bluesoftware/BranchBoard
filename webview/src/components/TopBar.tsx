@@ -15,9 +15,11 @@ interface Props {
   search: string;
   showInactive: boolean;
   inactiveTaskCount: number;
+  selectedUserIds: string[];
   onFilterChange: (f: UserFilter) => void;
   onSearchChange: (q: string) => void;
   onShowInactiveChange: (show: boolean) => void;
+  onToggleUserFilter: (userId: string) => void;
   onAddColumn: (name: string) => void;
   onRefresh: () => void;
   onSync: () => void;
@@ -36,9 +38,11 @@ export function TopBar({
   search,
   showInactive,
   inactiveTaskCount,
+  selectedUserIds,
   onFilterChange,
   onSearchChange,
   onShowInactiveChange,
+  onToggleUserFilter,
   onAddColumn,
   onRefresh,
   onSync,
@@ -91,12 +95,7 @@ export function TopBar({
           )}
         </div>
 
-        <UserSwitcher
-          users={board.users}
-          currentUserId={currentUserId}
-          filter={filter}
-          onChange={onFilterChange}
-        />
+        <UserSwitcher currentUserId={currentUserId} filter={filter} onChange={onFilterChange} />
 
         <button
           className={`bb-inactive-switch ${showInactive ? "on" : ""}`}
@@ -134,6 +133,28 @@ export function TopBar({
           </button>
         )}
       </div>
+
+      {board.users.length > 0 && (
+        <div className="bb-topbar-row bb-userfilter-row">
+          {board.users.map((u) => {
+            const active = selectedUserIds.includes(u.id);
+            return (
+              <button
+                key={u.id}
+                type="button"
+                className={`bb-user-badge ${active ? "active" : ""}`}
+                title={u.id === currentUserId ? `${u.name} (${t("topBar.you")})` : u.name}
+                onClick={() => onToggleUserFilter(u.id)}
+              >
+                <span className="bb-avatar small" style={{ background: u.color }}>
+                  {u.avatarText}
+                </span>
+                {u.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </header>
   );
 }

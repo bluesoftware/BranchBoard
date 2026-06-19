@@ -4,6 +4,15 @@
     "tagline": "Jedno zadanie. Jeden branch. Jeden workflow.",
     "loading": "Wczytywanie BranchBoard…"
   },
+  "adminAnnouncement": {
+    "release": {
+      "title": "Nowa wersja BranchBoard: SQL, synchronizacja i komunikaty administratora",
+      "message": "Przeczytaj krótkie podsumowanie przed aktualizacją. Przenosimy dane BranchBoard z jednego dużego JSON-a do tabel SQLite, dzięki czemu tablica będzie działać szybciej i stabilniej przy większej liczbie zadań. Włączamy też synchronizację między użytkownikami oraz widoczne komunikaty administratora, żeby każdy wiedział, kiedy pobrać nową wersję.",
+      "changes": "Dane są migrowane do tabel SQLite bez utraty obecnej pracy. Tablica powinna szybciej działać przy dużej liczbie zadań, komentarzy i podzadań. Zmiany będą lepiej synchronizowane między osobami podłączonymi do tej samej bazy. Administrator może wysłać widoczny alert z linkiem do aktualizacji.",
+      "tutorial": "Jak korzystać: pobierz i zainstaluj nową wersję BranchBoard, otwórz tablicę i poczekaj na migrację danych, przeczytaj komunikat administratora, a najlepiej zaktualizujcie wszystkie stanowiska tego samego dnia.",
+      "linkLabel": "Pobierz nową wersję"
+    }
+  },
   "topBar": {
     "myTasks": "Moje zadania",
     "allTasks": "Wszystkie zadania",
@@ -28,7 +37,8 @@
     "storageLocal": "Lokalny JSON",
     "storageServer": "Serwer",
     "redetectUser": "Wykryj ponownie użytkownika Git",
-    "importUsers": "Importuj użytkowników z Git"
+    "importUsers": "Importuj użytkowników z Git",
+    "userFilterAll": "Wszyscy"
   },
   "board": {
     "emptyColumn": "Brak zadań",
@@ -36,6 +46,13 @@
     "addTask": "Dodaj zadanie",
     "taskName": "Nazwa zadania",
     "cancel": "Anuluj"
+  },
+  "quickAdd": {
+    "fabTitle": "Dodaj nowe zadanie",
+    "title": "Nowe zadanie",
+    "titleLabel": "Tytuł zadania",
+    "requiredHint": "Tytuł jest wymagany, aby zapisać zadanie.",
+    "columnLabel": "Kolumna"
   },
   "column": {
     "rename": "Zmień nazwę",
@@ -103,7 +120,9 @@
     "finishHint": "Wypchnij branch i bezpiecznie przesuń zadanie dalej.",
     "createBranch": "Utwórz branch",
     "checkoutBranch": "Przełącz na branch",
+    "checkoutShort": "Przełącz",
     "pushBranch": "Wypchnij branch",
+    "updateFromMain": "Wyrównaj do main",
     "mergeToMain": "Scal do main",
     "copyAiPrompt": "Kopiuj prompt AI",
     "copyAiPromptHint": "Użyj tego promptu w Cursorze, Claude albo Copilot Chat.",
@@ -135,6 +154,12 @@
     "onThisBranch": "Jesteś na tym branchu.",
     "branchDiffers": "Bieżący branch różni się od brancha zadania.",
     "uncommitted": "Masz niezacommitowane zmiany.",
+    "production": {
+      "productionServerRollback": "Na serwerze produkcyjnym z lokalnym SQLite nie można cofać zadań z Produkcji. Cofnij je z lokalnego klienta po SSH, wtedy BranchBoard przełączy branch zadania.",
+      "productionChecklistIncomplete": "Nie można przenieść zadania na Produkcję, dopóki wszystkie podzadania nie są zakończone.",
+      "productionRequiresChecklist": "Na Produkcję można przenieść dopiero po zakończeniu wszystkich podzadań.",
+      "checklistLocked": "Podzadania w kolumnie Produkcja są zablokowane."
+    },
     "lastCommit": "Ostatni commit",
     "history": "Historia",
     "created": "Utworzono",
@@ -156,6 +181,7 @@
     "aiModelPlaceholder": "np. Claude, GPT-4, Copilot…",
     "aiChecklist": "Checklista review AI",
     "aiAddChecklist": "Dodaj checklistę review AI",
+    "fileMentionSuggestions": "Podpowiedzi plików",
     "files": {
       "title": "Zmienione pliki (branch)",
       "loading": "Wczytywanie plików brancha…",
@@ -165,8 +191,6 @@
     },
     "context": "Praca i historia",
     "details": "Szczegóły",
-    "attachedFiles": "Pliki zadania",
-    "attachPlaceholder": "Dodaj ścieżkę pliku (zacznij pisać, by podpowiedzieć)…",
     "acceptance": "Kryteria akceptacji",
     "acceptancePlaceholder": "Jedno kryterium w linii — kiedy zadanie uznajemy za zrobione…",
     "help": {
@@ -195,14 +219,15 @@
       "aiModel": "Jaki model/agent realizował zadanie (np. Claude, GPT-4).",
       "aiChecklist": "Lista kontrolna do weryfikacji zmian wygenerowanych przez AI.",
       "checklist": "Lista podzadań. Z niej budujemy też kryteria akceptacji w prompcie AI.",
-      "comments": "Rozmowa zespołu przy zadaniu.",
-      "attachedFiles": "Pliki z projektu, które zadanie dotyczy (do edycji / sprawdzenia). Trafiają do promptu AI i można je otworzyć jednym kliknięciem."
+      "comments": "Rozmowa zespołu przy zadaniu."
     },
     "tip": {
       "createBranch": "Utwórz branch z tego zadania i przełącz się na niego.",
       "checkout": "Przełącz repozytorium na branch tego zadania.",
+      "checkoutPublic": "Przełącz na branch zadania. Jeśli nie ma go lokalnie, BranchBoard pobierze go z {remote}; jeśli nie jest wypchnięty publicznie, pokaże komunikat.",
       "push": "Wypchnij branch do zdalnego repozytorium.",
       "copyBranch": "Skopiuj nazwę brancha do schowka.",
+      "updateFromMain": "Przełącz na branch tego zadania i wyrównaj go do origin/main: pobierze najnowsze zmiany z serwera i zaktualizuje branch. W razie konfliktu operacja zostanie bezpiecznie przerwana, a BranchBoard pokaże listę plików, które trzeba ręcznie scalić.",
       "merge": "Scal branch do main (z potwierdzeniem i backupem).",
       "deployDev": "Uruchom komendę deploya DEV dla tego brancha.",
       "openDev": "Otwórz adres środowiska DEV w przeglądarce.",
@@ -367,7 +392,7 @@
     "aiFlag": "Zadanie tworzone z AI",
     "overdueShort": "{days} dni po terminie",
     "today": "dziś",
-    "attachedFiles": "Podpięte pliki: {count}"
+    "unreadComments": "Nieprzeczytane wiadomości w czacie"
   },
   "priority": {
     "none": "Brak",
@@ -383,6 +408,14 @@
     "chore": "Chore (utrzymanie)",
     "refactor": "Refactor",
     "docs": "Docs (dokumentacja)"
+  },
+  "taskTypeShort": {
+    "feature": "FEATURE",
+    "bugfix": "BUG",
+    "hotfix": "HOTFIX",
+    "chore": "CHORE",
+    "refactor": "REFACTOR",
+    "docs": "DOCS"
   },
   "git": {
     "noRepo": "Otwórz repozytorium Git, aby korzystać z funkcji Git w BranchBoard.",

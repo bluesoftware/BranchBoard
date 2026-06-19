@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -17,11 +17,16 @@ import {
 } from "../types";
 import { t } from "../i18n";
 import { buildAiPrompt, formatDate, slugify, suggestBranchName } from "../utils";
-import { CopyIcon, FileIcon, SparkleIcon } from "./Icons";
+import { guardTaskMove, hasIncompleteSubtasks, isProductionColumn, isTaskInProduction } from "../productionGuards";
+import { CheckoutIcon, CopyIcon, RefreshIcon, SparkleIcon } from "./Icons";
 import { WorkLog } from "./task/WorkLog";
 import { Checklist } from "./task/Checklist";
 import { Comments } from "./task/Comments";
-import { RichDescription } from "./task/RichDescription";
+import { FileMentionInput } from "./task/FileMentionInput";
+
+const RichDescription = lazy(() =>
+  import("./task/RichDescription").then((module) => ({ default: module.RichDescription }))
+);
 
 interface Props {
   task: BoardTask;
@@ -41,6 +46,7 @@ interface Props {
   onCreateBranch: (branchName: string) => void;
   onCheckoutBranch: (branchName: string) => void;
   onPushBranch: (branchName: string) => void;
+  onUpdateFromMain: (branchName: string) => void;
   onFinishTask: () => void;
   onMergeToMain: () => void;
   onCopyClipboard: (text: string, label: string) => void;
@@ -230,50 +236,25 @@ export function TaskDrawer(props: Props) {
   const { task, board, git, appConfig } = props;
   const [title, setTitle] = useState(task.title);
   const [branchName, setBranchName] = useState(task.branchName);
-  const [fileInput, setFileInput] = useState("");
-  const titleRef = useRef<HTMLTextAreaElement>(null);
-
-  const attachedFiles = task.attachedFiles ?? [];
-  // Debounced file search so typing stays smooth and the suggestion list
-  // (capped to 10 on the extension side) doesn't thrash on every keystroke.
-  const searchTimer = useRef<number | undefined>(undefined);
-  const searchFiles = (q: string) => {
-    window.clearTimeout(searchTimer.current);
-    if (q.trim().length < 1) {
-      return;
-    }
-    searchTimer.current = window.setTimeout(() => props.onSearchFiles(q), 180);
-  };
-  const addAttachedFile = (raw: string) => {
-    const p = raw.trim().replace(/^@/, "");
-    if (!p || attachedFiles.includes(p)) {
-      setFileInput("");
-      return;
-    }
-    props.onSave({ attachedFiles: [...attachedFiles, p] });
-    setFileInput("");
-  };
-  const removeAttachedFile = (p: string) =>
-    props.onSave({ attachedFiles: attachedFiles.filter((x) => x !== p) });
+  const editorFallback = <div className="bb-muted small">{t("app.loading")}</div>;
 
   useEffect(() => {
     setTitle(task.title);
     setBranchName(task.branchName);
   }, [task.id, task.title, task.branchName]);
 
-  useEffect(() => {
-    const el = titleRef.current;
-    if (!el) {
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [title]);
-
   const checklist = task.checklist ?? [];
+  const productionChecklistLocked = isTaskInProduction(board, task);
+  const productionMoveRequiresChecklist = hasIncompleteSubtasks(task);
+  const productionColumn = board.columns.find((column) => isProductionColumn(column)) ?? null;
+  const productionActionBlocked = !!productionColumn && productionMoveRequiresChecklist;
 
   const saveField = (patch: Partial<BoardTask>) => props.onSave(patch);
-  const saveChecklist = (items: ChecklistItem[]) => props.onSave({ checklist: items });
+  const saveChecklist = (items: ChecklistItem[]) => {
+    if (!productionChecklistLocked) {
+      props.onSave({ checklist: items });
+    }
+  };
 
   const ai: TaskAI = task.ai ?? {
     createdByAi: false,
@@ -370,6 +351,20 @@ export function TaskDrawer(props: Props) {
       saveField({ branchName: normalizedBranch });
     }
   };
+  const checkoutBranch = () => {
+    const normalizedBranch = branchName.trim();
+    if (!normalizedBranch) {
+      return;
+    }
+    saveBranch(normalizedBranch);
+    props.onCheckoutBranch(normalizedBranch);
+  };
+  const canMoveToColumn = (columnId: string) => guardTaskMove(board, appConfig, task, columnId).ok;
+  const saveColumn = (columnId: string) => {
+    if (canMoveToColumn(columnId)) {
+      saveField({ columnId });
+    }
+  };
 
   return (
     <div className="bb-task-modal-overlay" onMouseDown={props.onClose}>
@@ -402,87 +397,50 @@ export function TaskDrawer(props: Props) {
                 {task.status === "done" ? "✓" : ""}
               </button>
               <div className="bb-task-title-stack">
-                <textarea
-                  ref={titleRef}
+                <FileMentionInput
+                  multiline
+                  autoGrow
                   className="bb-task-modal-title"
-                  rows={1}
                   value={title}
                   title={t("task.help.title")}
-                  onChange={(e) => setTitle(e.target.value)}
+                  fileSuggestions={props.fileSuggestions}
+                  onSearchFiles={props.onSearchFiles}
+                  onChange={setTitle}
                   onBlur={saveTitle}
                 />
-                <RichDescription
-                  value={task.description}
-                  placeholder={t("task.descriptionPlaceholder")}
-                  onSave={(description) => saveField({ description })}
-                />
+                <Suspense fallback={editorFallback}>
+                  <RichDescription
+                    value={task.description}
+                    placeholder={t("task.descriptionPlaceholder")}
+                    onSave={(description) => saveField({ description })}
+                    fileSuggestions={props.fileSuggestions}
+                    onSearchFiles={props.onSearchFiles}
+                    onOpenFile={props.onOpenFile}
+                  />
+                </Suspense>
               </div>
             </section>
             <div className="bb-task-workspace">
-              <Checklist titleLabel="Pod-zadania" items={checklist} onChange={saveChecklist} />
+              <Checklist
+                titleLabel="Pod-zadania"
+                items={checklist}
+                onChange={saveChecklist}
+                readOnly={productionChecklistLocked}
+                readOnlyMessage={t("task.production.checklistLocked")}
+                fileSuggestions={props.fileSuggestions}
+                onSearchFiles={props.onSearchFiles}
+                onOpenFile={props.onOpenFile}
+              />
               <Comments
                 comments={task.comments}
                 users={board.users}
                 task={task}
                 currentUserId={props.currentUserId}
                 onAdd={props.onAddComment}
+                fileSuggestions={props.fileSuggestions}
+                onSearchFiles={props.onSearchFiles}
+                onOpenFile={props.onOpenFile}
               />
-
-              <section className="bb-section bb-task-files-inline">
-                <div className="bb-section-title">
-                  {t("task.attachedFiles")} {attachedFiles.length > 0 ? `(${attachedFiles.length})` : ""}
-                  <Help text={t("task.help.attachedFiles")} />
-                </div>
-                {attachedFiles.length > 0 && (
-                  <ul className="bb-attached-list">
-                    {attachedFiles.map((f) => (
-                      <li key={f} className="bb-attached-item">
-                        <FileIcon size={12} />
-                        <span
-                          className="bb-attached-path"
-                          title={t("task.files.open")}
-                          onClick={() => props.onOpenFile(f)}
-                        >
-                          {f}
-                        </span>
-                        <button
-                          className="bb-iconbtn"
-                          title={t("common.delete")}
-                          onClick={() => removeAttachedFile(f)}
-                        >
-                          ✕
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <div className="bb-comment-add">
-                  <input
-                    className="bb-input bb-mono"
-                    list="bb-file-suggest"
-                    value={fileInput}
-                    placeholder={t("task.attachPlaceholder")}
-                    onChange={(e) => {
-                      setFileInput(e.target.value);
-                      searchFiles(e.target.value);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addAttachedFile(fileInput);
-                      }
-                    }}
-                  />
-                  <datalist id="bb-file-suggest">
-                    {props.fileSuggestions.map((f) => (
-                      <option key={f} value={f} />
-                    ))}
-                  </datalist>
-                  <button className="bb-btn" disabled={!fileInput.trim()} onClick={() => addAttachedFile(fileInput)}>
-                    {t("task.addItem")}
-                  </button>
-                </div>
-              </section>
 
               <TaskSection
                 title="Zaawansowane / techniczne"
@@ -559,7 +517,7 @@ export function TaskDrawer(props: Props) {
                 className="bb-btn"
                 disabled={!gitEnabled || !branchName}
                 title={t("task.tip.checkout")}
-                onClick={() => props.onCheckoutBranch(branchName)}
+                onClick={checkoutBranch}
               >
                 {t("task.checkoutBranch")}
               </button>
@@ -581,18 +539,31 @@ export function TaskDrawer(props: Props) {
                 {t("task.copyBranchName")}
               </button>
               <button
-                className="bb-btn accent full"
+                className="bb-btn"
                 disabled={!gitEnabled || !branchName}
+                title={t("task.tip.updateFromMain")}
+                onClick={() => props.onUpdateFromMain(branchName)}
+              >
+                <RefreshIcon size={12} />
+                {t("task.updateFromMain")} ({appConfig.policy.updateBranchStrategy})
+              </button>
+              <button
+                className="bb-btn accent full"
+                disabled={!gitEnabled || !branchName || productionActionBlocked}
                 onClick={props.onFinishTask}
-                title={t("task.finishHint")}
+                title={
+                  productionActionBlocked ? t("task.production.productionChecklistIncomplete") : t("task.finishHint")
+                }
               >
                 {t("task.finish")}
               </button>
               {appConfig.policy.allowDirectMergeToMain && (
                 <button
                   className="bb-btn warn full"
-                  disabled={!gitEnabled || !branchName}
-                  title={t("task.tip.merge")}
+                  disabled={!gitEnabled || !branchName || productionActionBlocked}
+                  title={
+                    productionActionBlocked ? t("task.production.productionChecklistIncomplete") : t("task.tip.merge")
+                  }
                   onClick={props.onMergeToMain}
                 >
                   {t("task.mergeToMain")}
@@ -685,8 +656,12 @@ export function TaskDrawer(props: Props) {
               {policy.allowProductionDeploy && (
                 <button
                   className="bb-btn warn full"
-                  disabled={!gitEnabled || !branchName || !policy.productionDeployCommand}
-                  title={t("task.tip.deployProd")}
+                  disabled={!gitEnabled || !branchName || !policy.productionDeployCommand || productionActionBlocked}
+                  title={
+                    productionActionBlocked
+                      ? t("task.production.productionChecklistIncomplete")
+                      : t("task.tip.deployProd")
+                  }
                   onClick={props.onDeployProduction}
                 >
                   {t("task.deploy.toProd")}
@@ -888,16 +863,19 @@ export function TaskDrawer(props: Props) {
                 <select
                   className="bb-task-property-control"
                   value={task.columnId}
-                  onChange={(e) => saveField({ columnId: e.target.value })}
+                  onChange={(e) => saveColumn(e.target.value)}
                 >
                   {[...board.columns]
                     .sort((a, b) => a.position - b.position)
                     .map((c) => (
-                      <option key={c.id} value={c.id}>
+                      <option key={c.id} value={c.id} disabled={!canMoveToColumn(c.id)}>
                         {c.name}
                       </option>
                     ))}
                 </select>
+                {productionMoveRequiresChecklist && (
+                  <span className="bb-muted small">{t("task.production.productionRequiresChecklist")}</span>
+                )}
               </PropertyRow>
 
               <PropertyRow label={t("task.type")} help={t("task.help.type")}>
@@ -925,7 +903,18 @@ export function TaskDrawer(props: Props) {
                     onChange={(e) => setBranchName(e.target.value)}
                     onBlur={() => saveBranch(branchName)}
                   />
-                  {!branchName && (
+                  {branchName ? (
+                    <button
+                      type="button"
+                      className="bb-task-property-action"
+                      title={t("task.tip.checkoutPublic", { remote: policy.remoteName })}
+                      disabled={!gitEnabled}
+                      onClick={checkoutBranch}
+                    >
+                      <CheckoutIcon size={14} />
+                      <span>{t("task.checkoutShort")}</span>
+                    </button>
+                  ) : (
                     <button
                       type="button"
                       className="bb-task-property-plus"

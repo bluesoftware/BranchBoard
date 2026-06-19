@@ -41,7 +41,7 @@ interface ListRow {
 
 function bucketOf(name: string): "in-progress" | "review" | "testing" | "done" | "blocked" | "other" {
   const s = name.toLowerCase();
-  if (/zrobione|gotowe|done/.test(s)) return "done";
+  if (/zrobione|gotowe|done|produkc/.test(s)) return "done";
   if (/block|zablokow|wstrzym/.test(s)) return "blocked";
   if (/test|do.?testu|qa/.test(s)) return "testing";
   if (/review|przegl|do.?zatwierdz/.test(s)) return "review";

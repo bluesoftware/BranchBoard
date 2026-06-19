@@ -11,6 +11,18 @@ export const pl = {
   taskTitlePrompt: "Tytuł zadania",
   selectTaskBranch: "Wybierz branch zadania do przełączenia",
   noGitRepo: "BranchBoard: brak repozytorium Git w tym workspace.",
+  branchNotPushedPublic:
+    "To zadanie nie ma jeszcze publicznie wypchniętego brancha na {remote}. Najpierw wypchnij branch.",
+  productionRollbackLocked:
+    "Na serwerze produkcyjnym z lokalnym SQLite nie można cofać zadań z Produkcji. Cofnij je z lokalnego klienta po SSH.",
+  productionChecklistIncomplete:
+    "Nie można przenieść zadania na Produkcję, dopóki wszystkie podzadania nie są zakończone.",
+  productionChecklistLocked:
+    "Podzadania w kolumnie Produkcja są zablokowane i nie można ich edytować.",
+  productionRollbackNeedsBranch:
+    "Aby cofnąć zadanie z Produkcji, zadanie musi mieć przypisany branch.",
+  productionRollbackRecreated:
+    "Branch '{branch}' nie istniał już lokalnie ani na {remote}, więc został odtworzony od aktualnego '{main}' — można na nim wznowić pracę. Nic na {remote}/{main} nie zostało usunięte.",
   usersImported: "BranchBoard: zaimportowano {count} użytkownik(ów) z Git.",
   usersUpToDate: "BranchBoard: użytkownicy są aktualni względem Git.",
   userSyncFailed: "BranchBoard: synchronizacja użytkowników nie powiodła się — {error}",
@@ -52,6 +64,7 @@ export const pl = {
   notifTaskMovedToReviewBody: '"{title}" przeniesiono do review/testów.',
   notifTaskDoneTitle: "Zadanie zrobione",
   notifTaskDoneBody: '"{title}" oznaczono jako zrobione.',
+  notifOpenTaskAction: "Otwórz zadanie",
 };
 
 export type ExtMessages = typeof pl;

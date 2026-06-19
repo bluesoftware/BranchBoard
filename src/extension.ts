@@ -105,6 +105,17 @@ function readConfig(): BranchBoardConfig {
       soundEnabled: c.get("notifications.soundEnabled", true),
       soundId: c.get("notifications.soundId", "mail-alert"),
     },
+    adminAnnouncement: {
+      enabled: c.get("adminAnnouncement.enabled", false),
+      id: c.get("adminAnnouncement.id", ""),
+      title: c.get("adminAnnouncement.title", ""),
+      message: c.get("adminAnnouncement.message", ""),
+      linkUrl: c.get("adminAnnouncement.linkUrl", ""),
+      linkLabel: c.get("adminAnnouncement.linkLabel", ""),
+      severity: (["info", "warning", "critical"].includes(c.get("adminAnnouncement.severity", "info"))
+        ? c.get("adminAnnouncement.severity", "info")
+        : "info") as BranchBoardConfig["adminAnnouncement"]["severity"],
+    },
   };
 }
 
@@ -159,8 +170,20 @@ function emptyShellBoard(config: BranchBoardConfig): BoardData {
     events: [],
     deployments: [],
     notifications: [],
+    announcements: [],
     updatedAt: new Date().toISOString(),
   };
+}
+
+async function syncConfiguredAnnouncement(config: BranchBoardConfig): Promise<void> {
+  if (!boardService) {
+    return;
+  }
+  try {
+    await boardService.syncAdminAnnouncement(config.adminAnnouncement, config.currentUser || null);
+  } catch (err: any) {
+    Logger.warn(`Admin announcement sync skipped: ${err?.message ?? err}`);
+  }
 }
 
 /**
@@ -219,6 +242,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   try {
     await boardService.init();
+    await syncConfiguredAnnouncement(config);
     Logger.info(`Board loaded from ${storage.kind} storage.`);
   } catch (err: any) {
     Logger.error(`Initial load failed on ${storage.kind} storage: ${err?.message ?? err}`);
@@ -272,7 +296,9 @@ export async function activate(context: vscode.ExtensionContext) {
   /* ---------------- Commands ---------------- */
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("branchBoard.openBoard", () => BoardPanel.createOrShow(deps)),
+    vscode.commands.registerCommand("branchBoard.openBoard", (args?: { taskId?: string }) =>
+      BoardPanel.createOrShow(deps, undefined, args?.taskId)
+    ),
 
     vscode.commands.registerCommand("branchBoard.openCommandCenter", () =>
       BoardPanel.createOrShow(deps, "command")
@@ -341,6 +367,7 @@ export async function activate(context: vscode.ExtensionContext) {
         setLanguage(newCfg.language);
         startSyncTimer(newCfg.syncIntervalSeconds);
         startUserSyncTimer(newCfg.syncUsersIntervalHours);
+        void syncConfiguredAnnouncement(newCfg);
       }
     })
   );
@@ -511,8 +538,13 @@ async function syncUsersFromGit(announce: boolean) {
       }
       return;
     }
+    const gitUser = await gitService.getGitUser();
     const contributors = await gitService.getContributors();
-    const added = await boardService.importUsersFromGit(contributors);
+    const candidates = [
+      ...(gitUser.name || gitUser.email ? [{ name: gitUser.name ?? "", email: gitUser.email ?? "" }] : []),
+      ...contributors,
+    ];
+    const added = await boardService.importUsersFromGit(candidates);
     if (added > 0) {
       vscode.window.showInformationMessage(t("usersImported", { count: added }));
     } else if (announce) {

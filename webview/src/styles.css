@@ -400,6 +400,43 @@ select.bb-input {
   transform: translateX(16px);
 }
 
+.bb-userfilter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+.bb-user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--bb-border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--bb-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    background var(--bb-transition),
+    border-color var(--bb-transition),
+    color var(--bb-transition),
+    opacity var(--bb-transition);
+}
+.bb-user-badge:hover {
+  opacity: 0.85;
+  border-color: var(--bb-border-strong);
+}
+.bb-user-badge.active {
+  opacity: 1;
+  color: #f8fafc;
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(134, 239, 172, 0.55);
+}
+
 /* ---------------- Dropdown menus ---------------- */
 
 .bb-menu {
@@ -555,6 +592,61 @@ select.bb-input {
 .bb-notif-time {
   font-size: 10.5px;
   color: var(--bb-muted);
+}
+
+/* ---------------- Admin announcements ---------------- */
+
+.bb-admin-announcement {
+  position: fixed;
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(56, 189, 248, 0.42);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: rgba(22, 32, 43, 0.98);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.48);
+}
+
+.bb-admin-announcement.warning {
+  border-color: rgba(251, 191, 36, 0.58);
+}
+
+.bb-admin-announcement.critical {
+  border-color: rgba(248, 113, 113, 0.68);
+}
+
+.bb-admin-announcement-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bb-admin-announcement-title {
+  color: var(--bb-text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.bb-admin-announcement-message {
+  color: var(--bb-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.bb-admin-announcement-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ---------------- Board ---------------- */
@@ -827,6 +919,14 @@ select.bb-input {
   color: var(--bb-success);
 }
 
+.bb-meta-item.unread-comments {
+  color: var(--bb-success);
+  font-weight: 700;
+}
+.bb-meta-item.unread-comments svg {
+  color: var(--bb-success);
+}
+
 .bb-prio {
   display: inline-flex;
   align-items: center;
@@ -870,6 +970,25 @@ select.bb-input {
 }
 .bb-prio.urgent .bb-prio-dot {
   background: var(--bb-danger);
+}
+
+.bb-task-card-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.bb-type-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
 }
 
 .bb-avatar {
@@ -1280,6 +1399,22 @@ select.bb-input {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+.bb-rich-description-content a[href^="branchboard-file:"],
+.bb-rich-description-editor a[href^="branchboard-file:"] {
+  color: #7dd3fc;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-weight: 650;
+}
+.bb-file-mention-link {
+  color: #7dd3fc;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+.bb-file-mention-link:hover {
+  text-decoration: underline;
+}
 .bb-rich-description-shell {
   display: flex;
   flex-direction: column;
@@ -1305,6 +1440,61 @@ select.bb-input {
   height: 0;
   color: rgba(255, 255, 255, 0.35);
   pointer-events: none;
+}
+.bb-file-mention-input-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 4px;
+}
+.bb-file-mention-input-shell .bb-file-mention-menu {
+  position: relative;
+}
+.bb-file-mention-menu {
+  display: grid;
+  gap: 2px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid rgba(125, 211, 252, 0.26);
+  border-radius: 9px;
+  background: rgba(22, 27, 34, 0.98);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+}
+.bb-file-mention-item {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  text-align: left;
+}
+.bb-file-mention-item:hover,
+.bb-file-mention-item.active {
+  background: rgba(125, 211, 252, 0.13);
+  color: #ffffff;
+}
+.bb-file-mention-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 720;
+}
+.bb-file-mention-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.52);
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
 }
 .bb-rich-bubble-menu {
   display: inline-flex;
@@ -1438,9 +1628,6 @@ select.bb-input {
   max-height: min(48vh, 520px);
   overflow-y: auto;
 }
-.bb-task-files-inline {
-  padding-top: 2px;
-}
 .bb-task-modal .bb-input {
   min-height: 38px;
   padding: 8px 11px;
@@ -1572,6 +1759,31 @@ select.bb-input {
 }
 .bb-task-property-plus:hover {
   background: rgba(255, 122, 97, 0.12);
+}
+.bb-task-property-action {
+  min-width: 96px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+.bb-task-property-action:hover:not(:disabled) {
+  border-color: rgba(255, 122, 97, 0.36);
+  background: rgba(255, 122, 97, 0.12);
+  color: #ffffff;
+}
+.bb-task-property-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 .bb-task-modal-foot {
   flex: 0 0 auto;
@@ -3040,19 +3252,6 @@ select.bb-input {
 .bb-flag.ai { background: color-mix(in srgb, #a78bfa 22%, transparent); color: #a78bfa; }
 .bb-flag.overdue { background: color-mix(in srgb, var(--bb-danger) 18%, transparent); color: var(--bb-danger); }
 
-/* Attached files list in the task drawer */
-.bb-attached-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
-.bb-attached-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 8px; border-radius: var(--bb-radius-sm);
-  background: var(--bb-surface-hover); font-size: 12px;
-}
-.bb-attached-path {
-  flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--vscode-editor-font-family, monospace);
-}
-.bb-attached-path:hover { color: var(--bb-accent); text-decoration: underline; }
-
 /* Card flags: branch + due chips */
 .bb-flag.branch { background: var(--bb-surface-hover); color: var(--bb-muted); }
 .bb-flag.due.overdue { background: color-mix(in srgb, var(--bb-danger) 18%, transparent); color: var(--bb-danger); }
@@ -3865,3 +4064,73 @@ select.bb-input {
 }
 
 .bb-trow .bb-avatar { flex-shrink: 0; margin-top: 2px; }
+
+/* ---------------- Global "quick add task" FAB ---------------- */
+/* Rendered via a portal straight under <body>, so it floats above every
+   page/view in the app (board, today, command center, branch map, current
+   branch) regardless of any ancestor's overflow/stacking context. Sits
+   below the task-modal overlay (90) and toasts (200) so that opening any
+   other modal naturally covers it. */
+.bb-fab {
+  position: fixed;
+  left: 22px;
+  bottom: 22px;
+  z-index: 80;
+  width: 52px;
+  height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: #e5484d;
+  color: #fff;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(229, 72, 77, 0.45), 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: transform var(--bb-transition), background var(--bb-transition), box-shadow var(--bb-transition);
+}
+.bb-fab:hover {
+  background: #f25c61;
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 10px 28px rgba(229, 72, 77, 0.55), 0 3px 8px rgba(0, 0, 0, 0.4);
+}
+.bb-fab:active {
+  transform: translateY(0) scale(0.97);
+}
+.bb-fab span {
+  display: block;
+  margin-top: -2px;
+}
+
+/* ---------------- Quick add task modal ---------------- */
+.bb-quickadd-modal {
+  width: min(440px, calc(100vw - 48px));
+}
+.bb-quickadd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 28px 6px;
+}
+.bb-quickadd-body .bb-field-label {
+  margin-top: 10px;
+}
+.bb-quickadd-input.needs-input {
+  border-color: #eab308;
+  box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.55);
+  background: rgba(234, 179, 8, 0.08);
+}
+.bb-quickadd-hint {
+  font-size: 11px;
+  color: var(--bb-muted);
+  margin-top: -2px;
+}
+.bb-quickadd-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 28px 22px;
+}

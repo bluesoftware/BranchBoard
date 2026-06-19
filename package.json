@@ -2,7 +2,7 @@
   "name": "branchboard",
   "displayName": "BranchBoard",
   "description": "Git-connected Kanban board for VS Code and Cursor. One task, one branch, one workflow.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "branchboard",
   "license": "MIT",
   "repository": {
@@ -456,6 +456,43 @@
           "default": false,
           "description": "Reduce UI animations and transitions."
         },
+        "branchBoard.adminAnnouncement.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Publish a high-visibility admin announcement to the shared BranchBoard database from this build/settings profile."
+        },
+        "branchBoard.adminAnnouncement.id": {
+          "type": "string",
+          "default": "",
+          "description": "Unique admin announcement id. Change it for every new announcement, e.g. branchboard-0.3.1."
+        },
+        "branchBoard.adminAnnouncement.title": {
+          "type": "string",
+          "default": "",
+          "description": "Admin announcement title shown in a prominent BranchBoard alert."
+        },
+        "branchBoard.adminAnnouncement.message": {
+          "type": "string",
+          "default": "",
+          "editPresentation": "multilineText",
+          "description": "Admin announcement message shown to users connected to the same board database."
+        },
+        "branchBoard.adminAnnouncement.linkUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional URL opened from the admin announcement, e.g. a VSIX download link."
+        },
+        "branchBoard.adminAnnouncement.linkLabel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional label for the announcement link button."
+        },
+        "branchBoard.adminAnnouncement.severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "default": "info",
+          "description": "Visual severity of the admin announcement."
+        },
         "branchBoard.notifications.enabled": {
           "type": "boolean",
           "default": true,
@@ -521,7 +558,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run build:all",
+    "vscode:prepublish": "make build",
     "build:all": "npm run build:webview && npm run compile",
     "build:webview": "cd webview && npm install && npm run build",
     "compile": "tsc -p ./",

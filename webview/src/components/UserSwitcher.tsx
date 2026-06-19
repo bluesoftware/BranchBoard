@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { BoardUser, UserFilter } from "../types";
+import { UserFilter } from "../types";
 import { post } from "../vscode";
 import { t } from "../i18n";
 
 interface Props {
-  users: BoardUser[];
   currentUserId: string | null;
   filter: UserFilter;
   onChange: (f: UserFilter) => void;
@@ -21,7 +20,7 @@ const STATIC_FILTERS: Array<{ key: UserFilter; labelKey: string }> = [
   { key: "done", labelKey: "topBar.done" },
 ];
 
-export function UserSwitcher({ users, currentUserId, filter, onChange }: Props) {
+export function UserSwitcher({ currentUserId, filter, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -36,9 +35,7 @@ export function UserSwitcher({ users, currentUserId, filter, onChange }: Props) 
   }, []);
 
   const staticLabel = STATIC_FILTERS.find((f) => f.key === filter);
-  const label = staticLabel
-    ? t(staticLabel.labelKey)
-    : users.find((u) => u.id === filter)?.name ?? t("topBar.filter");
+  const label = staticLabel ? t(staticLabel.labelKey) : t("topBar.filter");
 
   const choose = (f: UserFilter) => {
     onChange(f);
@@ -60,20 +57,6 @@ export function UserSwitcher({ users, currentUserId, filter, onChange }: Props) 
               onClick={() => choose(f.key)}
             >
               {t(f.labelKey)}
-            </button>
-          ))}
-          {users.length > 0 && <div className="bb-menu-sep" />}
-          {users.map((u) => (
-            <button
-              key={u.id}
-              className={`bb-menu-item ${filter === u.id ? "active" : ""}`}
-              onClick={() => choose(u.id)}
-            >
-              <span className="bb-avatar small" style={{ background: u.color }}>
-                {u.avatarText}
-              </span>
-              {u.name}
-              {u.id === currentUserId ? ` (${t("topBar.you")})` : ""}
             </button>
           ))}
           <div className="bb-menu-sep" />

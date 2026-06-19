@@ -16,6 +16,10 @@ interface GitExecResult {
  * GitHub CLI is never assumed. Everything works against a plain remote.
  */
 export class GitService {
+  private resolvedGitCommand: string | undefined;
+  private fileIndex: { files: string[]; loadedAt: number } | undefined;
+  private fileIndexLoad: Promise<string[]> | undefined;
+
   constructor(
     private readonly cwd: string,
     private readonly getConfig: () => BranchBoardConfig
@@ -38,19 +42,47 @@ export class GitService {
     return { ...process.env, GIT_SSH_COMMAND: sshCmd };
   }
 
-  private run(args: string[]): Promise<GitExecResult> {
+  private gitCandidates(): string[] {
+    return Array.from(new Set(["git", "/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"]));
+  }
+
+  private runWith(command: string, args: string[]): Promise<GitExecResult> {
     return new Promise((resolve, reject) => {
-      execFile("git", args, { cwd: this.cwd, windowsHide: true, maxBuffer: 10 * 1024 * 1024, env: this.buildEnv() }, (err, stdout, stderr) => {
+      execFile(command, args, { cwd: this.cwd, windowsHide: true, maxBuffer: 10 * 1024 * 1024, env: this.buildEnv() }, (err, stdout, stderr) => {
         if (err) {
           const e = new Error(stderr?.trim() || err.message);
           (e as any).stdout = stdout;
           (e as any).stderr = stderr;
+          (e as any).code = (err as any).code;
           reject(e);
           return;
         }
         resolve({ stdout: stdout.toString(), stderr: stderr.toString() });
       });
     });
+  }
+
+  private async run(args: string[]): Promise<GitExecResult> {
+    if (this.resolvedGitCommand) {
+      return this.runWith(this.resolvedGitCommand, args);
+    }
+
+    const notFoundErrors: string[] = [];
+    for (const command of this.gitCandidates()) {
+      try {
+        const result = await this.runWith(command, args);
+        this.resolvedGitCommand = command;
+        return result;
+      } catch (err: any) {
+        if (err?.code === "ENOENT") {
+          notFoundErrors.push(`${command}: ${err.message}`);
+          continue;
+        }
+        this.resolvedGitCommand = command;
+        throw err;
+      }
+    }
+    throw new Error(`Git executable was not found. Tried: ${notFoundErrors.join("; ")}`);
   }
 
   private async requireCleanWorkingTree(action: string, message: string): Promise<OperationResult | null> {
@@ -121,15 +153,38 @@ export class GitService {
   }
 
   async getGitUser(): Promise<{ name: string | null; email: string | null }> {
-    const read = async (key: string): Promise<string | null> => {
+    const read = async (args: string[]): Promise<string | null> => {
       try {
-        const { stdout } = await this.run(["config", "--get", key]);
+        const { stdout } = await this.run(args);
         return stdout.trim() || null;
       } catch {
         return null;
       }
     };
-    return { name: await read("user.name"), email: await read("user.email") };
+
+    let name = await read(["config", "--get", "user.name"]);
+    let email = await read(["config", "--get", "user.email"]);
+
+    // In a not-yet-initialized repo, plain `git config --get` can miss local
+    // data. Global config keeps "current user" usable before the first commit.
+    name = name ?? (await read(["config", "--global", "--get", "user.name"]));
+    email = email ?? (await read(["config", "--global", "--get", "user.email"]));
+
+    // Last resort: if Git has no explicit identity, use the most recent author
+    // so existing projects can still match a board user instead of showing an
+    // empty profile.
+    if (!name || !email) {
+      try {
+        const { stdout } = await this.run(["log", "-1", "--format=%an%x09%ae", "HEAD"]);
+        const [authorName, authorEmail] = stdout.trim().split("\t");
+        name = name ?? (authorName?.trim() || null);
+        email = email ?? (authorEmail?.trim() || null);
+      } catch {
+        /* no commits yet */
+      }
+    }
+
+    return { name, email };
   }
 
   /** Unique commit authors across all branches: used to seed board users. */
@@ -444,17 +499,37 @@ export class GitService {
       const { stdout } = await this.run(["-c", "merge.autoStash=false", "merge", "--no-edit", `${remote}/${main}`]);
       return { ok: true, action: "updateBranchFromMain", message: `Merged ${remote}/${main} into the current branch.`, detail: stdout.trim() };
     } catch (err: any) {
+      // Before aborting, capture which files are actually in conflict so the
+      // user knows exactly what to resolve — the raw git error alone does
+      // not reliably list this.
+      let conflictFiles: string[] = [];
+      try {
+        const { stdout } = await this.run(["diff", "--name-only", "--diff-filter=U"]);
+        conflictFiles = stdout
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+      } catch {
+        /* best-effort only; abort below still happens regardless */
+      }
       // Abort a conflicted merge/rebase so the working tree stays clean.
       try {
         await this.run([strategy === "rebase" ? "rebase" : "merge", "--abort"]);
       } catch {
         /* nothing to abort */
       }
+      const conflictDetail =
+        conflictFiles.length > 0
+          ? `Conflicting files (${conflictFiles.length}):\n${conflictFiles.map((f) => `  - ${f}`).join("\n")}`
+          : undefined;
       return {
         ok: false,
         action: "updateBranchFromMain",
-        message: `Update from ${main} failed (conflict or error). The operation was aborted.`,
-        detail: err?.message,
+        message:
+          conflictFiles.length > 0
+            ? `Update from ${main} failed: ${conflictFiles.length} file(s) are in conflict. Nothing was changed — the ${strategy} was aborted.`
+            : `Update from ${main} failed (conflict or error). The operation was aborted.`,
+        detail: conflictDetail ? `${conflictDetail}\n\n${err?.message ?? ""}`.trim() : err?.message,
       };
     }
   }
@@ -464,22 +539,87 @@ export class GitService {
    * case-insensitive substring query. Used for the task's attach-file
    * autocomplete. Read-only, no network.
    */
+  private async getFileIndex(): Promise<string[]> {
+    const maxAgeMs = 30_000;
+    if (this.fileIndex && Date.now() - this.fileIndex.loadedAt < maxAgeMs) {
+      return this.fileIndex.files;
+    }
+    if (this.fileIndexLoad) {
+      return this.fileIndexLoad;
+    }
+    this.fileIndexLoad = this.run(["ls-files", "--cached", "--others", "--exclude-standard"])
+      .then(({ stdout }) => {
+        const files = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+        this.fileIndex = { files, loadedAt: Date.now() };
+        return files;
+      })
+      .catch(() => [])
+      .finally(() => {
+        this.fileIndexLoad = undefined;
+      });
+    return this.fileIndexLoad;
+  }
+
+  private fileMatchScore(file: string, query: string): number {
+    const q = query.trim().toLowerCase().replace(/^@/, "");
+    if (!q) {
+      return 0;
+    }
+    const pathLower = file.toLowerCase();
+    const nameLower = pathLower.slice(pathLower.lastIndexOf("/") + 1);
+    const compactPath = pathLower.replace(/[._/-]+/g, "");
+    const compactQuery = q.replace(/[._/-]+/g, "");
+
+    if (pathLower === q) {
+      return 0;
+    }
+    if (nameLower === q) {
+      return 1;
+    }
+    if (pathLower.startsWith(q)) {
+      return 10 + file.length / 1000;
+    }
+    if (nameLower.startsWith(q)) {
+      return 20 + nameLower.length / 1000;
+    }
+    const nameIndex = nameLower.indexOf(q);
+    if (nameIndex >= 0) {
+      return 40 + nameIndex + nameLower.length / 1000;
+    }
+    const pathIndex = pathLower.indexOf(q);
+    if (pathIndex >= 0) {
+      return 70 + pathIndex + file.length / 1000;
+    }
+    if (compactQuery && compactPath.includes(compactQuery)) {
+      return 120 + compactPath.indexOf(compactQuery) + file.length / 1000;
+    }
+
+    let pos = 0;
+    let gaps = 0;
+    for (const char of q) {
+      const next = pathLower.indexOf(char, pos);
+      if (next < 0) {
+        return Number.POSITIVE_INFINITY;
+      }
+      gaps += next - pos;
+      pos = next + 1;
+    }
+    return 180 + gaps + file.length / 1000;
+  }
+
   async listTrackedFiles(query = "", limit = 10): Promise<string[]> {
     try {
-      const { stdout } = await this.run(["ls-files", "--cached", "--others", "--exclude-standard"]);
       const q = query.trim().toLowerCase();
-      const all = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
-      const matched = q ? all.filter((f) => f.toLowerCase().includes(q)) : all;
-      // Prefer matches where the filename (not just the path) contains the query.
-      matched.sort((a, b) => {
-        if (!q) {
-          return a.localeCompare(b);
-        }
-        const aName = a.slice(a.lastIndexOf("/") + 1).toLowerCase().includes(q) ? 0 : 1;
-        const bName = b.slice(b.lastIndexOf("/") + 1).toLowerCase().includes(q) ? 0 : 1;
-        return aName - bName || a.length - b.length;
-      });
-      return matched.slice(0, limit);
+      const all = await this.getFileIndex();
+      if (!q) {
+        return all.slice(0, limit);
+      }
+      return all
+        .map((file) => ({ file, score: this.fileMatchScore(file, q) }))
+        .filter((entry) => Number.isFinite(entry.score))
+        .sort((a, b) => a.score - b.score || a.file.length - b.file.length || a.file.localeCompare(b.file))
+        .slice(0, limit)
+        .map((entry) => entry.file);
     } catch {
       return [];
     }
@@ -720,6 +860,15 @@ export class GitService {
     }
   }
 
+  async localBranchExists(name: string): Promise<boolean> {
+    try {
+      await this.run(["rev-parse", "--verify", "--quiet", `refs/heads/${name}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Does a branch exist on the remote (origin/<name>)? */
   async remoteBranchExists(name: string): Promise<boolean> {
     const remote = this.getConfig().remoteName || "origin";
@@ -794,6 +943,124 @@ export class GitService {
       return { ok: true, action: "checkoutBranch", message: `Switched to '${branchName}'.` };
     } catch (err: any) {
       return { ok: false, action: "checkoutBranch", message: `Could not switch to '${branchName}'.`, detail: err?.message };
+    }
+  }
+
+  async checkoutPublicBranch(branchName: string, notPushedMessage: string): Promise<OperationResult> {
+    const action = "checkoutBranch";
+    try {
+      await this.assertValidBranchName(branchName);
+      if (await this.localBranchExists(branchName)) {
+        await this.run(["checkout", branchName]);
+        return { ok: true, action, message: `Switched to '${branchName}'.` };
+      }
+
+      const remote = this.getConfig().remoteName || "origin";
+      try {
+        await this.run([
+          "fetch",
+          remote,
+          `refs/heads/${branchName}:refs/remotes/${remote}/${branchName}`,
+        ]);
+      } catch {
+        return { ok: false, action, message: notPushedMessage };
+      }
+
+      if (!(await this.remoteBranchExists(branchName))) {
+        return { ok: false, action, message: notPushedMessage };
+      }
+
+      await this.run(["checkout", "-b", branchName, "--track", `${remote}/${branchName}`]);
+      return { ok: true, action, message: `Fetched and switched to '${branchName}' from ${remote}.` };
+    } catch (err: any) {
+      return { ok: false, action, message: `Could not switch to '${branchName}'.`, detail: err?.message };
+    }
+  }
+
+  /**
+   * Resume work on a task branch after rolling it back OUT of Production:
+   *  - exists locally         -> checkout
+   *  - exists on the remote    -> fetch + checkout -b --track origin/<name>
+   *  - doesn't exist anywhere  -> re-cut it from the CURRENT tip of main
+   *    (fast-forwarded from origin/main first, best-effort), under the SAME
+   *    branch name, so work can resume and later be pushed/merged again.
+   * This is the common case right after a finish flow deleted the branch on
+   * merge: instead of blocking the rollback, BranchBoard recreates the
+   * branch. It only ever READS origin/main (fetch / fast-forward) — it never
+   * deletes or rewrites anything already on the remote.
+   */
+  async resumeBranchFromMain(branchName: string): Promise<OperationResult> {
+    const action = "resumeBranch";
+    try {
+      await this.assertValidBranchName(branchName);
+
+      const dirty = await this.requireCleanWorkingTree(
+        action,
+        `Working tree is not clean. Commit or stash changes before resuming '${branchName}'.`
+      );
+      if (dirty) {
+        return dirty;
+      }
+
+      if (await this.localBranchExists(branchName)) {
+        await this.run(["checkout", branchName]);
+        return { ok: true, action, message: `Switched back to '${branchName}'.` };
+      }
+
+      const remote = this.getConfig().remoteName || "origin";
+      try {
+        await this.run([
+          "fetch",
+          remote,
+          `refs/heads/${branchName}:refs/remotes/${remote}/${branchName}`,
+        ]);
+      } catch {
+        /* offline or no such branch on the remote — fall through */
+      }
+      if (await this.remoteBranchExists(branchName)) {
+        await this.run(["checkout", "-b", branchName, "--track", `${remote}/${branchName}`]);
+        return { ok: true, action, message: `Fetched and switched back to '${branchName}' from ${remote}.` };
+      }
+
+      // Branch is gone everywhere (e.g. deleted after merging into main):
+      // recreate it from the current tip of main, under the same name.
+      const main = await this.getMainBranch();
+      const original = await this.getCurrentBranch();
+      try {
+        await this.run(["checkout", main]);
+      } catch (err: any) {
+        return {
+          ok: false,
+          action,
+          message: `Could not switch to '${main}' to recreate '${branchName}'.`,
+          detail: err?.message,
+        };
+      }
+      try {
+        await this.fastForwardFromRemote(remote, main);
+      } catch {
+        /* main may have no upstream yet, or is already up to date — continue with local */
+      }
+      try {
+        await this.run(["checkout", "-b", branchName]);
+      } catch (err: any) {
+        if (original) {
+          await this.run(["checkout", original]).catch(() => undefined);
+        }
+        return {
+          ok: false,
+          action,
+          message: `Could not recreate branch '${branchName}' from '${main}'.`,
+          detail: err?.message,
+        };
+      }
+      return {
+        ok: true,
+        action,
+        message: `Branch '${branchName}' no longer existed, so it was recreated from the current '${main}'. Work can resume on it; nothing on ${remote}/${main} was touched.`,
+      };
+    } catch (err: any) {
+      return { ok: false, action, message: `Could not resume branch '${branchName}'.`, detail: err?.message };
     }
   }
 

@@ -3,6 +3,7 @@ import { AppConfig, BoardData, BoardEvent, BranchDetail, BranchFlowRow, Checklis
 import { t } from "../i18n";
 import { formatDate, relativeTime } from "../utils";
 import { richTextToPlainText } from "../richText";
+import { guardTaskMove, hasIncompleteSubtasks, isTaskInProduction } from "../productionGuards";
 import { AppView } from "../components/navigation/MainNav";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Badge, BadgeTone } from "../components/common/Badge";
@@ -65,7 +66,7 @@ function timeLabels() {
 
 function bucketOf(name: string): "in-progress" | "review" | "testing" | "done" | "other" {
   const s = name.toLowerCase();
-  if (/zrobione|gotowe|done/.test(s)) return "done";
+  if (/zrobione|gotowe|done|produkc/.test(s)) return "done";
   if (/test|do.?testu|qa/.test(s)) return "testing";
   if (/review|przegl|do.?zatwierdz/.test(s)) return "review";
   if (/in.?progress|w.?toku|w.?trakcie/.test(s)) return "in-progress";
@@ -168,15 +169,20 @@ export function CurrentBranchPage(props: Props) {
 
   const policy = props.appConfig.policy;
   const sortedColumns = [...board.columns].sort((a, b) => a.position - b.position);
+  const productionColumn =
+    sortedColumns.find((c) => c.gitStage === "production" || /produkc|production|zrobione|done/i.test(`${c.id} ${c.name}`)) ??
+    null;
   const assignee = task ? board.users.find((u) => u.id === task.assignedUserId) ?? null : null;
   const descriptionPreview = task ? richTextToPlainText(task.description) : "";
   const checklistDone = task?.checklist?.filter((item) => item.done).length ?? 0;
   const checklistTotal = task?.checklist?.length ?? 0;
+  const productionChecklistLocked = !!task && isTaskInProduction(board, task);
   const hasRemote = row?.info.existsRemote ?? false;
   const canDeployDev = !!task && !!policy.devDeployCommand;
   const branchTitle = branch ?? "";
   const riskTone = row?.riskLevel ?? "low";
   const riskKey = RISK_LABEL_KEY[riskTone] ?? "branchMap.riskLow";
+  const finishAllowed = !task || !productionColumn || !hasIncompleteSubtasks(task);
 
   const statusPills = (
     <div className="bb-cb-status-pills">
@@ -209,7 +215,12 @@ export function CurrentBranchPage(props: Props) {
         </button>
       </Tooltip>
       {task && (
-        <button className="bb-btn accent" disabled={!branch} onClick={() => props.onFinish(task.id)} title={t("task.finishHint")}>
+        <button
+          className="bb-btn accent"
+          disabled={!branch || !finishAllowed}
+          onClick={() => props.onFinish(task.id)}
+          title={finishAllowed ? t("task.finishHint") : t("task.production.productionChecklistIncomplete")}
+        >
           <FinishIcon />
           {t("currentBranch.finishTask")}
         </button>
@@ -401,6 +412,7 @@ export function CurrentBranchPage(props: Props) {
                 <div className="bb-cb-task-top">
                   <button
                     className={`bb-check ${task.status === "done" ? "checked" : ""}`}
+                    disabled={!finishAllowed}
                     onClick={() => props.onFinish(task.id)}
                     title={t("currentBranch.finishTask")}
                   >
@@ -451,12 +463,14 @@ export function CurrentBranchPage(props: Props) {
                   {sortedColumns.map((c) => {
                     const isCurrent = c.id === task.columnId;
                     const done = bucketOf(c.name) === "done";
+                    const moveAllowed = guardTaskMove(board, props.appConfig, task, c.id).ok;
                     return (
                       <button
                         key={c.id}
                         className={`bb-flow-stage ${isCurrent ? "current" : ""}`}
+                        disabled={!isCurrent && !moveAllowed}
                         onClick={() => {
-                          if (isCurrent) return;
+                          if (isCurrent || !moveAllowed) return;
                           if (done) props.onFinish(task.id);
                           else props.onMoveTask(task.id, c.id);
                         }}
@@ -473,13 +487,20 @@ export function CurrentBranchPage(props: Props) {
                   <span className="bb-section-title">{t("currentBranch.checklistAndDiscussion")}</span>
                 </div>
                 <div className="bb-cb-collab-grid">
-                  <Checklist items={task.checklist ?? []} onChange={(items) => props.onSaveChecklist(task.id, items)} />
+                  <Checklist
+                    items={task.checklist ?? []}
+                    onChange={(items) => props.onSaveChecklist(task.id, items)}
+                    readOnly={productionChecklistLocked}
+                    readOnlyMessage={t("task.production.checklistLocked")}
+                    onOpenFile={props.onOpenFile}
+                  />
                   <Comments
                     comments={task.comments}
                     users={board.users}
                     task={task}
                     currentUserId={currentUserId}
                     onAdd={(text) => props.onAddComment(task.id, text)}
+                    onOpenFile={props.onOpenFile}
                   />
                 </div>
               </section>

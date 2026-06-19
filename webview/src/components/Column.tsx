@@ -12,6 +12,11 @@ interface Props {
   appConfig: AppConfig;
   git: GitInfo | null;
   currentUserId: string | null;
+  unreadCommentTaskIds: Set<string>;
+  // New tasks can only be created directly in the first two columns
+  // (e.g. BACKLOG / DO ZROBIENIA); later columns are reached by moving a
+  // task forward via drag-and-drop or the Git flow, not by adding into them.
+  canAddTask: boolean;
   dropIndex: number | null;
   isColumnDragging: boolean;
   isTaskDragging: boolean;
@@ -25,6 +30,7 @@ interface Props {
   onTaskDragEnd: () => void;
   onTaskDragOver: (index: number) => void;
   onTaskDrop: () => void;
+  canDropTask: boolean;
   onColumnDragStart: () => void;
   onColumnDragOverHeader: (e: ReactDragEvent) => void;
   onColumnDropHeader: () => void;
@@ -140,15 +146,17 @@ export function Column(props: Props) {
               >
                 {t("column.rename")}
               </button>
-              <button
-                className="bb-menu-item"
-                onClick={() => {
-                  setAdding(true);
-                  setMenuOpen(false);
-                }}
-              >
-                {t("column.addTask")}
-              </button>
+              {props.canAddTask && (
+                <button
+                  className="bb-menu-item"
+                  onClick={() => {
+                    setAdding(true);
+                    setMenuOpen(false);
+                  }}
+                >
+                  {t("column.addTask")}
+                </button>
+              )}
               <button
                 className="bb-menu-item"
                 onClick={() => {
@@ -176,13 +184,13 @@ export function Column(props: Props) {
       <div
         className="bb-column-body"
         onDragOver={(e) => {
-          if (props.isTaskDragging) {
+          if (props.isTaskDragging && props.canDropTask) {
             e.preventDefault();
             props.onTaskDragOver(tasks.length);
           }
         }}
         onDrop={(e) => {
-          if (props.isTaskDragging) {
+          if (props.isTaskDragging && props.canDropTask) {
             e.preventDefault();
             props.onTaskDrop();
           }
@@ -198,7 +206,7 @@ export function Column(props: Props) {
           <div
             key={task.id}
             onDragOver={(e) => {
-              if (props.isTaskDragging) {
+              if (props.isTaskDragging && props.canDropTask) {
                 e.preventDefault();
                 e.stopPropagation();
                 const r = e.currentTarget.getBoundingClientRect();
@@ -213,6 +221,7 @@ export function Column(props: Props) {
               users={users}
               appConfig={props.appConfig}
               git={props.git}
+              hasUnreadComments={props.unreadCommentTaskIds.has(task.id)}
               onOpen={() => props.onOpenTask(task.id)}
               onToggleDone={() => props.onToggleDone(task)}
               onDragStart={() => props.onTaskDragStart(task.id)}
@@ -222,39 +231,40 @@ export function Column(props: Props) {
         ))}
         {props.dropIndex === tasks.length && placeholder}
 
-        {adding ? (
-          <div className="bb-addtask">
-            <textarea
-              className="bb-input bb-addtask-input"
-              autoFocus
-              value={title}
-              placeholder={t("board.taskName")}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  commitAdd();
-                }
-                if (e.key === "Escape") {
-                  setTitle("");
-                  setAdding(false);
-                }
-              }}
-            />
-            <div className="bb-addtask-actions">
-              <button className="bb-btn accent" onMouseDown={(e) => e.preventDefault()} onClick={commitAdd}>
-                {t("board.addTask")}
-              </button>
-              <button className="bb-btn ghost" onClick={() => setAdding(false)}>
-                {t("board.cancel")}
-              </button>
+        {props.canAddTask &&
+          (adding ? (
+            <div className="bb-addtask">
+              <textarea
+                className="bb-input bb-addtask-input"
+                autoFocus
+                value={title}
+                placeholder={t("board.taskName")}
+                onChange={(e) => setTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    commitAdd();
+                  }
+                  if (e.key === "Escape") {
+                    setTitle("");
+                    setAdding(false);
+                  }
+                }}
+              />
+              <div className="bb-addtask-actions">
+                <button className="bb-btn accent" onMouseDown={(e) => e.preventDefault()} onClick={commitAdd}>
+                  {t("board.addTask")}
+                </button>
+                <button className="bb-btn ghost" onClick={() => setAdding(false)}>
+                  {t("board.cancel")}
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <button className="bb-addtask-btn" onClick={() => setAdding(true)}>
-            <span className="bb-plus">+</span> {t("board.addTask")}
-          </button>
-        )}
+          ) : (
+            <button className="bb-addtask-btn" onClick={() => setAdding(true)}>
+              <span className="bb-plus">+</span> {t("board.addTask")}
+            </button>
+          ))}
       </div>
     </section>
   );

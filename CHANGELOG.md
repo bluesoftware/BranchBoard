@@ -3,6 +3,43 @@
 All notable changes to BranchBoard are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0] — 2026-06-19
+
+### PL
+- Przeniesiono wspólną bazę BranchBoard z jednego dużego JSON-a do tabel SQLite,
+  z automatyczną migracją istniejących danych bez utraty obecnej pracy.
+- Przyspieszono odczyt i zapis większych tablic: zadania, komentarze, podzadania,
+  użytkownicy, powiadomienia i ogłoszenia są obsługiwane jako osobne kolekcje.
+- Dodano synchronizację zmian między użytkownikami podłączonymi do tej samej bazy
+  oraz blokadę zapisu ze starych buildów po migracji.
+- Dodano widoczne komunikaty administratora z linkiem do nowej wersji VSIX:
+  https://blue-software.pl/BranchBoard.vsix.
+- Wzmocniono zasady Produkcji: zadań z Produkcji nie cofa się z serwera produkcyjnego,
+  podzadania na Produkcji są zablokowane, a deploy na Produkcję wymaga zakończonych
+  podzadań.
+- Zoptymalizowano webview przez code-splitting Vite: główny bundle ładuje się lżej,
+  a cięższe ekrany i edytor opisu są doładowywane dopiero wtedy, gdy są potrzebne.
+
+### EN
+- Moved the shared BranchBoard database from one large JSON blob into SQLite tables,
+  with automatic migration of existing work.
+- Improved large-board performance by storing tasks, comments, subtasks, users,
+  notifications, and announcements as separate collections.
+- Added better multi-user synchronization for one shared database and write protection
+  against old builds after migration.
+- Added high-visibility admin announcements with the VSIX download link:
+  https://blue-software.pl/BranchBoard.vsix.
+- Strengthened Production workflow safety: Production tasks cannot be rolled back from
+  the production server, Production subtasks are locked, and Production moves require
+  completed subtasks.
+- Optimized the webview with Vite code-splitting: the main bundle is lighter, while
+  heavier screens and the rich description editor load only when needed.
+
+### Quick Start
+- Zainstaluj nowy VSIX, otwórz tablicę i poczekaj na migrację danych.
+- Jeśli pojawi się komunikat administratora, przeczytaj go przed dalszą pracą.
+- Najlepiej zaktualizujcie wszystkie stanowiska tego samego dnia.
+
 ## [0.2.0] — 2026-06-06
 
 ### Added

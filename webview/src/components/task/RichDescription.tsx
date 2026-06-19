@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
@@ -7,11 +8,15 @@ import Placeholder from "@tiptap/extension-placeholder";
 import type { Editor } from "@tiptap/react";
 import { t } from "../../i18n";
 import { normalizeRichTextHtml, sanitizeRichTextHtml } from "../../richText";
+import { FILE_MENTION_RE, shouldLinkFileMention } from "../../fileMentionDisplay";
 
 interface Props {
   value: string;
   placeholder: string;
   onSave: (value: string) => void;
+  fileSuggestions: string[];
+  onSearchFiles: (query: string) => void;
+  onOpenFile: (path: string) => void;
 }
 
 interface TextSelectionRange {
@@ -20,10 +25,76 @@ interface TextSelectionRange {
 }
 
 const HTTPS_URL_RE = /https:\/\/[^\s<>"']+/i;
+const FILE_MENTION_SCHEME = "branchboard-file:";
 
 function extractHttpsUrl(value: string): string | null {
   const match = value.match(HTTPS_URL_RE);
   return match ? match[0].replace(/[),.;!?]+$/, "") : null;
+}
+
+function fileMentionHref(path: string): string {
+  return `${FILE_MENTION_SCHEME}${encodeURIComponent(path)}`;
+}
+
+function filePathFromHref(href: string): string | null {
+  if (!href.startsWith(FILE_MENTION_SCHEME)) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(href.slice(FILE_MENTION_SCHEME.length));
+  } catch {
+    return href.slice(FILE_MENTION_SCHEME.length);
+  }
+}
+
+function linkifyFileMentions(html: string): string {
+  if (!html.trim() || typeof document === "undefined") {
+    return html;
+  }
+
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const textNodes: Text[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    const parent = node.parentElement;
+    if (parent?.closest("a, code, pre")) {
+      continue;
+    }
+    if (node.nodeValue?.includes("@")) {
+      textNodes.push(node);
+    }
+  }
+
+  for (const node of textNodes) {
+    const text = node.nodeValue ?? "";
+    FILE_MENTION_RE.lastIndex = 0;
+    let last = 0;
+    let changed = false;
+    const fragment = document.createDocumentFragment();
+    for (const match of text.matchAll(FILE_MENTION_RE)) {
+      const index = match.index ?? 0;
+      const prefix = match[1] ?? "";
+      const filePath = (match[2] ?? "").replace(/[),.;!?]+$/, "");
+      if (!shouldLinkFileMention(filePath)) {
+        continue;
+      }
+      changed = true;
+      fragment.append(document.createTextNode(text.slice(last, index + prefix.length)));
+      const link = document.createElement("a");
+      link.href = fileMentionHref(filePath);
+      link.textContent = `@${filePath}`;
+      fragment.append(link);
+      last = index + prefix.length + 1 + filePath.length;
+    }
+    if (changed) {
+      fragment.append(document.createTextNode(text.slice(last)));
+      node.replaceWith(fragment);
+    }
+  }
+
+  return container.innerHTML;
 }
 
 function ToolbarButton({
@@ -49,14 +120,101 @@ function ToolbarButton({
   );
 }
 
-export function RichDescription({ value, placeholder, onSave }: Props) {
+export function RichDescription({ value, placeholder, onSave, fileSuggestions, onSearchFiles, onOpenFile }: Props) {
   const [editing, setEditing] = useState(false);
   const initialHtml = useMemo(() => normalizeRichTextHtml(value), [value]);
+  const displayHtml = useMemo(() => sanitizeRichTextHtml(linkifyFileMentions(initialHtml)), [initialHtml]);
   const [draftHtml, setDraftHtml] = useState(initialHtml);
   const [linkInputOpen, setLinkInputOpen] = useState(false);
   const [linkInputValue, setLinkInputValue] = useState("");
+  const [fileMentionQuery, setFileMentionQuery] = useState("");
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const linkInputRef = useRef<HTMLInputElement | null>(null);
   const linkRangeRef = useRef<TextSelectionRange | null>(null);
+  const fileMentionRangeRef = useRef<TextSelectionRange | null>(null);
+  const fileMentionQueryRef = useRef("");
+  const fileSuggestionsRef = useRef<string[]>([]);
+  const selectedFileIndexRef = useRef(0);
+  const editorRef = useRef<Editor | null>(null);
+
+  useEffect(() => {
+    fileSuggestionsRef.current = fileSuggestions;
+    selectedFileIndexRef.current = Math.min(selectedFileIndexRef.current, Math.max(0, fileSuggestions.length - 1));
+  }, [fileSuggestions]);
+
+  useEffect(() => {
+    selectedFileIndexRef.current = selectedFileIndex;
+  }, [selectedFileIndex]);
+
+  useEffect(() => {
+    fileMentionQueryRef.current = fileMentionQuery;
+  }, [fileMentionQuery]);
+
+  useEffect(() => {
+    if (!editing || fileMentionQuery.trim().length < 1) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => onSearchFiles(fileMentionQuery), 90);
+    return () => window.clearTimeout(timer);
+  }, [editing, fileMentionQuery, onSearchFiles]);
+
+  const updateFileMentionState = (activeEditor: Editor) => {
+    const selection = activeEditor.state.selection;
+    if (!selection.empty) {
+      fileMentionRangeRef.current = null;
+      setFileMentionQuery("");
+      return;
+    }
+
+    const from = selection.from;
+    const lookBehind = activeEditor.state.doc.textBetween(Math.max(0, from - 240), from, "\n", "\n");
+    const match = lookBehind.match(/(?:^|\s)@([^\s@]*)$/);
+    const query = match?.[1] ?? "";
+    if (!match || query.length < 1) {
+      fileMentionRangeRef.current = null;
+      setFileMentionQuery("");
+      return;
+    }
+
+    fileMentionRangeRef.current = { from: from - query.length - 1, to: from };
+    setFileMentionQuery(query);
+    setSelectedFileIndex(0);
+  };
+
+  const moveFileSelection = (delta: number) => {
+    const total = fileSuggestionsRef.current.length;
+    if (total === 0) {
+      return;
+    }
+    setSelectedFileIndex((current) => {
+      const next = (current + delta + total) % total;
+      selectedFileIndexRef.current = next;
+      return next;
+    });
+  };
+
+  const insertFileMention = (filePath: string) => {
+    const range = fileMentionRangeRef.current;
+    const activeEditor = editorRef.current;
+    if (!activeEditor || !range) {
+      return;
+    }
+    activeEditor
+      .chain()
+      .focus()
+      .deleteRange(range)
+      .insertContent([
+        {
+          type: "text",
+          text: `@${filePath}`,
+          marks: [{ type: "link", attrs: { href: fileMentionHref(filePath), target: null, rel: null } }],
+        },
+        { type: "text", text: " " },
+      ])
+      .run();
+    setFileMentionQuery("");
+    fileMentionRangeRef.current = null;
+  };
 
   const editor = useEditor({
     extensions: [
@@ -69,7 +227,7 @@ export function RichDescription({ value, placeholder, onSave }: Props) {
         autolink: true,
         defaultProtocol: "https",
         openOnClick: false,
-        protocols: ["http", "https", "mailto"],
+        protocols: ["http", "https", "mailto", "branchboard-file"],
         HTMLAttributes: {
           rel: "noopener noreferrer nofollow",
           target: "_blank",
@@ -85,11 +243,47 @@ export function RichDescription({ value, placeholder, onSave }: Props) {
       attributes: {
         class: "bb-rich-description-editor",
       },
+      handleKeyDown: (_view, event) => {
+        const suggestions = fileSuggestionsRef.current;
+        if (!fileMentionQueryRef.current || suggestions.length === 0) {
+          return false;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          moveFileSelection(1);
+          return true;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          moveFileSelection(-1);
+          return true;
+        }
+        if (event.key === "Enter" || event.key === "Tab") {
+          event.preventDefault();
+          insertFileMention(suggestions[selectedFileIndexRef.current] ?? suggestions[0]);
+          return true;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setFileMentionQuery("");
+          fileMentionRangeRef.current = null;
+          return true;
+        }
+        return false;
+      },
     },
     onUpdate: ({ editor }) => {
       setDraftHtml(sanitizeRichTextHtml(editor.getHTML()));
+      updateFileMentionState(editor);
+    },
+    onSelectionUpdate: ({ editor }) => {
+      updateFileMentionState(editor);
     },
   });
+
+  useEffect(() => {
+    editorRef.current = editor ?? null;
+  }, [editor]);
 
   useEffect(() => {
     if (!editing) {
@@ -120,7 +314,7 @@ export function RichDescription({ value, placeholder, onSave }: Props) {
   };
 
   const save = () => {
-    const next = sanitizeRichTextHtml(draftHtml);
+    const next = sanitizeRichTextHtml(linkifyFileMentions(draftHtml));
     if (next !== value) {
       onSave(next);
     }
@@ -176,14 +370,30 @@ export function RichDescription({ value, placeholder, onSave }: Props) {
   };
 
   if (!editing) {
-    const hasContent = initialHtml.trim().length > 0;
+    const hasContent = displayHtml.trim().length > 0;
+
+    const handleViewClick = (event: MouseEvent<HTMLDivElement>) => {
+      const link = (event.target as HTMLElement).closest("a");
+      if (link) {
+        const filePath = filePathFromHref(link.getAttribute("href") ?? "");
+        if (filePath) {
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenFile(filePath);
+          return;
+        }
+        event.stopPropagation();
+        return;
+      }
+      beginEdit();
+    };
 
     return (
       <div
         className={`bb-rich-description-view ${hasContent ? "" : "empty"}`}
         role="button"
         tabIndex={0}
-        onClick={beginEdit}
+        onClick={handleViewClick}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -194,7 +404,7 @@ export function RichDescription({ value, placeholder, onSave }: Props) {
         {hasContent ? (
           <div
             className="bb-rich-description-content"
-            dangerouslySetInnerHTML={{ __html: initialHtml }}
+            dangerouslySetInnerHTML={{ __html: displayHtml }}
           />
         ) : (
           <span>{placeholder}</span>
@@ -264,6 +474,24 @@ export function RichDescription({ value, placeholder, onSave }: Props) {
         </BubbleMenu>
       )}
       <EditorContent editor={editor} />
+      {editing && fileMentionQuery && fileSuggestions.length > 0 && (
+        <div className="bb-file-mention-menu" role="listbox" aria-label={t("task.fileMentionSuggestions")}>
+          {fileSuggestions.slice(0, 8).map((filePath, index) => (
+            <button
+              key={filePath}
+              type="button"
+              className={`bb-file-mention-item ${index === selectedFileIndex ? "active" : ""}`}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                insertFileMention(filePath);
+              }}
+            >
+              <span className="bb-file-mention-name">{filePath.slice(filePath.lastIndexOf("/") + 1)}</span>
+              <span className="bb-file-mention-path">{filePath}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="bb-rich-description-actions">
         <button className="bb-btn ghost" type="button" onClick={cancel}>
           {t("common.cancel")}

@@ -65,6 +65,7 @@ export function createDefaultBoard(
     events: [],
     deployments: [],
     notifications: [],
+    announcements: [],
   };
 }
 
@@ -145,6 +146,9 @@ export const MAX_STORED_EVENTS = 300;
 
 /** Hard cap on stored notifications so board.json never grows unbounded. */
 export const MAX_STORED_NOTIFICATIONS = 200;
+
+/** Hard cap on admin announcements; each announcement tracks per-user read state. */
+export const MAX_STORED_ANNOUNCEMENTS = 50;
 
 /** Standard column set used by the onboarding "Create board" flow (Git-mapped). */
 export const ONBOARDING_COLUMNS: BoardData["columns"] = GIT_FLOW_COLUMNS_EN.map((c) => ({ ...c }));

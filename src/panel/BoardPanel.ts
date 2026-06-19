@@ -5,6 +5,7 @@ import * as fs from "fs";
 import {
   AppConfig,
   BoardData,
+  BoardNotificationRecord,
   BoardTask,
   BranchBoardConfig,
   GitInfo,
@@ -39,6 +40,20 @@ export interface ControllerDeps {
 /**
  * Resolve the active board user from config + git identity.
  */
+function normalizeIdentity(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9@._ -]+/g, "")
+    .replace(/[\s._-]+/g, " ")
+    .trim();
+}
+
+function emailKey(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
 export function resolveCurrentUserId(
   board: BoardData,
   git: GitInfo,
@@ -48,20 +63,33 @@ export function resolveCurrentUserId(
     return config.currentUser;
   }
   if (config.autoDetectGitUser) {
-    if (git.userEmail) {
-      const byEmail = board.users.find(
-        (u) => u.email && u.email.toLowerCase() === git.userEmail!.toLowerCase()
-      );
+    const gitEmail = emailKey(git.userEmail);
+    const gitName = normalizeIdentity(git.userName);
+    if (gitEmail) {
+      const byEmail = board.users.find((u) => u.email && emailKey(u.email) === gitEmail);
       if (byEmail) {
         return byEmail.id;
       }
     }
-    if (git.userName) {
-      const byName = board.users.find(
-        (u) => u.name && u.name.toLowerCase() === git.userName!.toLowerCase()
-      );
+    if (gitName) {
+      const byName = board.users.find((u) => u.name && normalizeIdentity(u.name) === gitName);
       if (byName) {
         return byName.id;
+      }
+      const gitTokens = gitName.split(" ").filter((token) => token.length > 1);
+      const byNameTokens = board.users.find((u) => {
+        const userName = normalizeIdentity(u.name);
+        if (!userName) {
+          return false;
+        }
+        const userTokens = userName.split(" ").filter((token) => token.length > 1);
+        return (
+          (userTokens.length >= 2 && userTokens.every((token) => gitTokens.includes(token))) ||
+          (gitTokens.length >= 2 && gitTokens.every((token) => userTokens.includes(token)))
+        );
+      });
+      if (byNameTokens) {
+        return byNameTokens.id;
       }
     }
   }
@@ -75,13 +103,19 @@ export function resolveCurrentUserId(
 export class WebviewController {
   private boardSub: (() => void) | undefined;
   private notifSub: (() => void) | undefined;
+  private externalRecordSub: (() => void) | undefined;
   private configSub: vscode.Disposable | undefined;
   private readonly analytics: BranchAnalyticsService;
   private readonly runner: CommandRunnerService;
   /** Set once the webview requests dashboard data, so we keep it live on changes. */
   private dashboardRequested = false;
+  private lastUsersSignature = "";
   /** Page to navigate to once the webview signals "ready". */
   private pendingPage: CommandCenterPage | undefined;
+  /** Task to open (in the board's task drawer) once the webview signals
+   *  "ready" — set when a native notification's "Open task" action is
+   *  clicked before the panel/view existed or while it was hidden. */
+  private pendingTaskId: string | undefined;
   /** The board user id resolved for THIS extension/window instance — used to
    *  decide whether a native toast for a notification should appear here. */
   private currentUserId: string | null = null;
@@ -100,12 +134,18 @@ export class WebviewController {
       ],
     };
     this.webview.html = this.getHtml();
+    this.lastUsersSignature = this.usersSignature(this.deps.board.getBoard());
 
     this.webview.onDidReceiveMessage((msg: InboundMessage) => this.onMessage(msg));
 
     // Re-push board on any change (and the dashboard if it's being viewed).
     this.boardSub = this.deps.board.onBoardChanged((b) => {
       this.postBoard(b);
+      const usersSignature = this.usersSignature(b);
+      if (usersSignature !== this.lastUsersSignature) {
+        this.lastUsersSignature = usersSignature;
+        void this.postGitInfo();
+      }
       if (this.dashboardRequested) {
         void this.postDashboard();
       }
@@ -114,11 +154,23 @@ export class WebviewController {
     this.notifSub = this.deps.board.onNotification((n) =>
       this.post({ type: "notification", payload: { message: n.message } })
     );
+    // Persisted notification records that this window only learns about via
+    // an external sync (someone else's machine created them) still need to
+    // reach the native VS Code toast/Notification Center on THIS recipient's
+    // machine — notify() only fires inline on the machine that performed the
+    // action, so this is the other half of that flow.
+    this.externalRecordSub = this.deps.board.onExternalNotificationRecord((record) =>
+      this.handleExternalNotificationRecord(record)
+    );
     // Keep the webview's config in sync when the user edits settings anywhere.
     this.configSub = vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("branchBoard")) {
         setLanguage(this.deps.getConfig().language);
         this.postAppConfig();
+        void this.deps.board.syncAdminAnnouncement(
+          this.deps.getConfig().adminAnnouncement,
+          (this.currentUserId ?? this.deps.getConfig().currentUser) || null
+        );
         void this.postGitInfo();
       }
     });
@@ -127,6 +179,7 @@ export class WebviewController {
   dispose() {
     this.boardSub?.();
     this.notifSub?.();
+    this.externalRecordSub?.();
     this.configSub?.dispose();
   }
 
@@ -136,6 +189,10 @@ export class WebviewController {
 
   private postBoard(board: BoardData) {
     this.post({ type: "boardData", payload: board });
+  }
+
+  private usersSignature(board: BoardData): string {
+    return board.users.map((u) => `${u.id}:${u.name}:${u.email}`).join("|");
   }
 
   /** Resolve the bundled notification sound files into webview-loadable URIs. */
@@ -165,6 +222,7 @@ export class WebviewController {
       },
       appearance: c.appearance,
       notifications: c.notifications,
+      adminAnnouncement: c.adminAnnouncement,
       soundFiles: this.getSoundFileUris(),
       policy: {
         allowDirectMergeToMain: c.allowDirectMergeToMain,
@@ -267,6 +325,18 @@ export class WebviewController {
   navigate(page: CommandCenterPage) {
     this.pendingPage = page;
     this.post({ type: "navigate", payload: { page } });
+  }
+
+  /**
+   * Ask the webview to open a specific task's drawer — used when the user
+   * clicks the "Open task" action on a native notification. Switches to the
+   * board page (the task drawer lives there) and remembers the request so it
+   * survives a fresh "ready" handshake if the panel/view had to be created
+   * first.
+   */
+  focusTask(taskId: string) {
+    this.pendingTaskId = taskId;
+    this.post({ type: "navigate", payload: { page: "board", taskId } });
   }
 
   /** Build the {{token}} substitution context for a task's hooks. */
@@ -374,6 +444,101 @@ export class WebviewController {
     );
   }
 
+  private isProductionColumnId(columnId: string | null | undefined): boolean {
+    if (!columnId) {
+      return false;
+    }
+    const col = this.deps.board.getColumn(columnId);
+    if (!col) {
+      return false;
+    }
+    const key = `${col.id} ${col.name} ${col.nameEn ?? ""}`.toLowerCase();
+    return col.gitStage === "production" || /produkc|production/.test(key);
+  }
+
+  private isProductionSqliteServer(): boolean {
+    const cfg = this.deps.getConfig();
+    return (
+      cfg.storageMode === "server" &&
+      this.deps.board.getStorageKind() === "server" &&
+      !cfg.sshHost.trim()
+    );
+  }
+
+  private hasIncompleteSubtasks(task: BoardTask): boolean {
+    return (task.checklist ?? []).some((item) => !item.done);
+  }
+
+  private guardTaskMove(task: BoardTask, toColumnId: string): OperationResult | undefined {
+    if (task.columnId === toColumnId) {
+      return undefined;
+    }
+    const fromProduction = this.isProductionColumnId(task.columnId);
+    const toProduction = this.isProductionColumnId(toColumnId);
+
+    if (fromProduction && !toProduction && this.isProductionSqliteServer()) {
+      return { ok: false, action: "moveTask", message: t("productionRollbackLocked") };
+    }
+    if (!fromProduction && toProduction && this.hasIncompleteSubtasks(task)) {
+      return { ok: false, action: "moveTask", message: t("productionChecklistIncomplete") };
+    }
+    return undefined;
+  }
+
+  private guardTaskUpdate(task: BoardTask, patch: Partial<BoardTask>): OperationResult | undefined {
+    if (patch.checklist !== undefined && this.isProductionColumnId(task.columnId)) {
+      return { ok: false, action: "updateTask", message: t("productionChecklistLocked") };
+    }
+    if (typeof patch.columnId === "string") {
+      return this.guardTaskMove(task, patch.columnId);
+    }
+    return undefined;
+  }
+
+  private guardProductionFinish(task: BoardTask): OperationResult | undefined {
+    const doneColumnId = this.deps.board.findDoneColumnId();
+    if (this.isProductionColumnId(doneColumnId) && this.hasIncompleteSubtasks(task)) {
+      return { ok: false, action: "finishTask", message: t("productionChecklistIncomplete") };
+    }
+    return undefined;
+  }
+
+  private async checkoutAfterProductionRollback(
+    msg: InboundMessage,
+    taskId: string,
+    fromColumnId: string,
+    fromIndex: number
+  ): Promise<boolean> {
+    const { board, git, getConfig } = this.deps;
+    const movedTask = board.getBoard().tasks.find((t) => t.id === taskId);
+    const branch = (movedTask?.branchName ?? "").trim();
+    if (!branch) {
+      await board.moveTask(taskId, fromColumnId, fromIndex);
+      this.postBoard(board.getBoard());
+      const res = { ok: false, action: "checkoutBranch", message: t("productionRollbackNeedsBranch") };
+      this.reply(msg, res);
+      this.toast(res);
+      return false;
+    }
+    // Resume work on the SAME branch: checkout if it still exists locally or
+    // on the remote, otherwise recreate it from the current main. This never
+    // deletes or rewrites anything already on origin/main — it only reads
+    // from it (fetch / fast-forward) before re-cutting the branch.
+    const res = await git.resumeBranchFromMain(branch);
+    if (!res.ok) {
+      await board.moveTask(taskId, fromColumnId, fromIndex);
+      this.postBoard(board.getBoard());
+      this.reply(msg, res);
+      this.toast(res);
+      return false;
+    }
+    await board.logEvent("branch_checked_out", { taskId, branchName: branch });
+    this.reply(msg, res);
+    this.toast(res);
+    await this.postGitInfo();
+    return true;
+  }
+
   /** Run the safe finish flow for a task and apply its board side-effects. */
   private async runFinishFlow(msg: InboundMessage, taskId: string): Promise<OperationResult | undefined> {
     const { board, git, getConfig } = this.deps;
@@ -381,6 +546,12 @@ export class WebviewController {
     const task = board.getBoard().tasks.find((t) => t.id === taskId);
     if (!task) {
       return undefined;
+    }
+    const finishGuard = this.guardProductionFinish(task);
+    if (finishGuard) {
+      this.reply(msg, finishGuard);
+      this.toast(finishGuard);
+      return finishGuard;
     }
     const result = await finishTaskGitFlow(git, cfg, task, {
       confirm: (m, detail) => this.confirmGit(m, detail),
@@ -552,7 +723,11 @@ export class WebviewController {
           this.postBoard(board.getBoard());
           await this.postGitInfo();
           if (this.pendingPage) {
-            this.post({ type: "navigate", payload: { page: this.pendingPage } });
+            this.post({ type: "navigate", payload: { page: this.pendingPage, taskId: this.pendingTaskId } });
+            this.pendingTaskId = undefined;
+          } else if (this.pendingTaskId) {
+            this.post({ type: "navigate", payload: { page: "board", taskId: this.pendingTaskId } });
+            this.pendingTaskId = undefined;
           }
           break;
 
@@ -568,7 +743,12 @@ export class WebviewController {
           const rel = String(msg.payload?.path ?? "").trim();
           if (rel) {
             try {
-              const abs = vscode.Uri.file(path.join(git.getCwd(), rel));
+              const root = path.resolve(git.getCwd());
+              const absPath = path.resolve(root, rel);
+              if (path.isAbsolute(rel) || (!absPath.startsWith(root + path.sep) && absPath !== root)) {
+                throw new Error("Path is outside the workspace.");
+              }
+              const abs = vscode.Uri.file(absPath);
               await vscode.window.showTextDocument(abs, { preview: true });
             } catch (err: any) {
               vscode.window.showWarningMessage(
@@ -853,14 +1033,18 @@ export class WebviewController {
 
         case "updateBranchFromMain": {
           const strategy = msg.payload?.strategy === "rebase" ? "rebase" : "merge";
+          const targetBranch = String(msg.payload?.branchName ?? "").trim() || null;
           const main = (await git.getInfo()).mainBranch || "main";
           const detailText =
             strategy === "rebase"
               ? "Rebase rewrites local history on top of main. Use only on branches that are not shared."
               : "This fetches and merges main into the current branch (a safe merge commit).";
+          const confirmMessage = targetBranch
+            ? `Switch to '${targetBranch}' and update it from '${main}' (${strategy})?`
+            : `Update the current branch from '${main}' (${strategy})?`;
           const confirmed =
             (await vscode.window.showWarningMessage(
-              `Update the current branch from '${main}' (${strategy})?`,
+              confirmMessage,
               { modal: true, detail: detailText },
               "Yes"
             )) === "Yes";
@@ -877,9 +1061,26 @@ export class WebviewController {
             this.toast(r);
             break;
           }
+          // If this was triggered from a specific task's branch, make sure
+          // we are actually on that branch before pulling main into it —
+          // "align to origin/main" means switch + update, not just update
+          // whatever happens to be checked out.
+          if (targetBranch && (await git.getCurrentBranch()) !== targetBranch) {
+            const remote = getConfig().remoteName || "origin";
+            const checkoutRes = await git.checkoutPublicBranch(
+              targetBranch,
+              t("branchNotPushedPublic", { remote })
+            );
+            if (!checkoutRes.ok) {
+              this.reply(msg, checkoutRes);
+              this.toast(checkoutRes);
+              break;
+            }
+          }
           const res = await git.updateBranchFromMain(strategy);
           if (res.ok) {
             await board.logEvent("branch_updated_from_main", {
+              taskId: msg.payload?.taskId ?? null,
               branchName: (await git.getInfo()).currentBranch,
               payload: { strategy },
             });
@@ -959,6 +1160,12 @@ export class WebviewController {
             break;
           }
           const env = msg.type === "deployProduction" ? "production" : "dev";
+          if (env === "production" && this.hasIncompleteSubtasks(task)) {
+            const res = { ok: false, action: "deployProduction", message: t("productionChecklistIncomplete") };
+            this.reply(msg, res);
+            this.toast(res);
+            break;
+          }
           const cfg = getConfig();
           const deployer =
             board.getBoard().users.find((u) => u.id === cfg.currentUser)?.name ?? null;
@@ -1142,6 +1349,24 @@ export class WebviewController {
           break;
         }
 
+        case "markTaskCommentsRead": {
+          const info = await git.getInfo();
+          const currentUserId = resolveCurrentUserId(board.getBoard(), info, getConfig());
+          if (currentUserId && msg.payload?.taskId) {
+            await board.markTaskCommentsRead(msg.payload.taskId, currentUserId);
+          }
+          break;
+        }
+
+        case "markAnnouncementRead": {
+          const info = await git.getInfo();
+          const currentUserId = resolveCurrentUserId(board.getBoard(), info, getConfig());
+          if (currentUserId && msg.payload?.announcementId) {
+            await board.markAnnouncementRead(msg.payload.announcementId, currentUserId);
+          }
+          break;
+        }
+
         case "refresh":
           this.postAppConfig();
           this.postBoard(board.getBoard());
@@ -1168,9 +1393,42 @@ export class WebviewController {
           break;
         }
 
-        case "updateTask":
-          await board.updateTask(msg.payload.id, msg.payload.patch);
+        case "updateTask": {
+          const task = board.getBoard().tasks.find((t) => t.id === msg.payload.id);
+          if (!task) {
+            break;
+          }
+          const patch = msg.payload.patch as Partial<BoardTask>;
+          const guard = this.guardTaskUpdate(task, patch);
+          if (guard) {
+            this.postBoard(board.getBoard());
+            this.reply(msg, guard);
+            this.toast(guard);
+            break;
+          }
+          const nextColumnId = typeof patch.columnId === "string" ? patch.columnId : null;
+          if (nextColumnId && nextColumnId !== task.columnId) {
+            const fromColumnId = task.columnId;
+            const fromIndex = (task.position ?? 1) - 1;
+            const leavingProduction =
+              this.isProductionColumnId(fromColumnId) && !this.isProductionColumnId(nextColumnId);
+            const rest: Partial<BoardTask> = { ...patch };
+            delete rest.columnId;
+            await board.moveTask(task.id, nextColumnId, 0);
+            if (leavingProduction) {
+              const checkedOut = await this.checkoutAfterProductionRollback(msg, task.id, fromColumnId, fromIndex);
+              if (!checkedOut) {
+                break;
+              }
+            }
+            if (Object.keys(rest).length > 0) {
+              await board.updateTask(task.id, rest);
+            }
+            break;
+          }
+          await board.updateTask(msg.payload.id, patch);
           break;
+        }
 
         case "deleteTask": {
           // Confirmation is requested from the extension host for safety.
@@ -1191,6 +1449,23 @@ export class WebviewController {
           const fromColumnId = before?.columnId;
           const fromIndex = (before?.position ?? 1) - 1;
           const changingColumn = !!fromColumnId && fromColumnId !== toColumnId;
+          const cfg = getConfig();
+
+          if (before) {
+            const guard = this.guardTaskMove(before, toColumnId);
+            if (guard) {
+              this.postBoard(board.getBoard());
+              this.reply(msg, guard);
+              this.toast(guard);
+              break;
+            }
+          }
+
+          const leavingProduction =
+            !!before &&
+            changingColumn &&
+            this.isProductionColumnId(fromColumnId) &&
+            !this.isProductionColumnId(toColumnId);
 
           // WIP-limit gate: ask before exceeding a column's limit.
           if (changingColumn) {
@@ -1211,6 +1486,11 @@ export class WebviewController {
           }
 
           await board.moveTask(taskId, toColumnId, toIndex);
+
+          if (leavingProduction) {
+            await this.checkoutAfterProductionRollback(msg, taskId, fromColumnId!, fromIndex);
+            break;
+          }
 
           if (changingColumn && toColumnId === board.findReviewColumnId()) {
             const movedToReview = board.getBoard().tasks.find((t) => t.id === taskId);
@@ -1242,7 +1522,6 @@ export class WebviewController {
           }
 
           // Git actions driven by the destination column's gitStage.
-          const cfg = getConfig();
           if (changingColumn && cfg.runGitActionsOnMove) {
             const gitResult = await this.runStageGitActions(msg, taskId, toColumnId);
             if (gitResult && !gitResult.ok && fromColumnId) {
@@ -1356,12 +1635,17 @@ export class WebviewController {
         }
 
         case "checkoutBranch": {
-          // ensureBranch (not checkoutBranch): the branch may only exist on
-          // origin (pushed by a teammate) — this creates a local tracking
-          // branch and checks it out instead of failing.
-          const res = await git.ensureBranch(msg.payload.branchName);
+          const branch = String(msg.payload?.branchName ?? "").trim();
+          if (!branch) {
+            break;
+          }
+          const remote = getConfig().remoteName || "origin";
+          const res = await git.checkoutPublicBranch(
+            branch,
+            t("branchNotPushedPublic", { remote })
+          );
           if (res.ok) {
-            await board.logEvent("branch_checked_out", { branchName: msg.payload.branchName });
+            await board.logEvent("branch_checked_out", { branchName: branch });
           }
           this.reply(msg, res);
           this.toast(res);
@@ -1388,6 +1672,12 @@ export class WebviewController {
         case "finishTask": {
           const task = board.getBoard().tasks.find((t) => t.id === msg.payload.taskId);
           if (!task) {
+            break;
+          }
+          const finishGuard = this.guardProductionFinish(task);
+          if (finishGuard) {
+            this.reply(msg, finishGuard);
+            this.toast(finishGuard);
             break;
           }
           const result = await finishTaskGitFlow(git, getConfig(), task, {
@@ -1439,6 +1729,12 @@ export class WebviewController {
           // Explicit merge action from a card. Reuse finish flow but force merge.
           const task = board.getBoard().tasks.find((t) => t.id === msg.payload.taskId);
           if (!task) {
+            break;
+          }
+          const finishGuard = this.guardProductionFinish(task);
+          if (finishGuard) {
+            this.reply(msg, finishGuard);
+            this.toast(finishGuard);
             break;
           }
           const cfg = { ...getConfig(), allowDirectMergeToMain: true };
@@ -1674,6 +1970,7 @@ export class WebviewController {
   ): Promise<void> {
     const cfg = this.deps.getConfig().notifications;
     if (!cfg?.enabled) {
+      Logger.debug(`notify(${type}): skipped — notifications.enabled is false`);
       return;
     }
     const flagByType: Record<NotificationType, boolean> = {
@@ -1685,12 +1982,21 @@ export class WebviewController {
       merge_failed: cfg.notifyMergeFailed,
       task_moved_to_review: cfg.notifyTaskMovedToReview,
       task_done: cfg.notifyTaskDone,
+      admin_announcement: true,
     };
     if (!flagByType[type]) {
+      Logger.debug(`notify(${type}): skipped — per-type setting is disabled`);
       return;
     }
     const record = await this.deps.board.addNotification(type, fields);
-    if (!record || !cfg.showToast) {
+    if (!record) {
+      Logger.debug(`notify(${type}): skipped — no recipients (record undefined)`);
+      return;
+    }
+    if (!cfg.showToast) {
+      Logger.debug(
+        `notify(${type}): persisted for [${record.recipientUserIds.join(", ")}], but showToast is false — no native toast`
+      );
       return;
     }
     // This extension/window instance only shows the native toast if ITS user
@@ -1698,9 +2004,69 @@ export class WebviewController {
     // PA's own window must stay quiet and only DW's window (once the change
     // syncs to DW's machine and is picked up as an "external" notification,
     // or immediately here if DW is the one performing the action) shows it.
+    Logger.debug(
+      `notify(${type}): currentUserId=${this.currentUserId ?? "null"}, recipients=[${record.recipientUserIds.join(", ")}]`
+    );
     if (this.currentUserId && record.recipientUserIds.includes(this.currentUserId)) {
-      vscode.window.showInformationMessage(`BranchBoard: ${fields.message}`);
+      Logger.debug(`notify(${type}): showing native toast for ${this.currentUserId}`);
+      this.showNativeToast(fields.message, fields.taskId);
+    } else {
+      Logger.debug(
+        `notify(${type}): native toast skipped — currentUserId (${this.currentUserId ?? "null"}) is not in recipients`
+      );
     }
+  }
+
+  /**
+   * Show the native VS Code toast (and thus the Notification Center "bell"
+   * entry) for a notification message, with an optional "Open task" action.
+   * Shared by notify() (same-machine actions) and
+   * handleExternalNotificationRecord() (notifications that arrived via an
+   * external sync from a different machine).
+   */
+  private showNativeToast(message: string, taskId?: string | null): void {
+    // Plain vscode.window.showInformationMessage — this is what populates
+    // BOTH the OS toast and VS Code's native Notification Center ("bell"),
+    // and plays whatever sound the user already has configured at the
+    // OS/VS Code level. We deliberately don't add any custom sound here:
+    // the in-webview Audio-based sound system (branchBoard.notifications.
+    // soundEnabled/soundId) already covers that while the board is open,
+    // and this native toast is only meant for when it's not in focus.
+    const openLabel = t("notifOpenTaskAction");
+    // IMPORTANT: do NOT await this — showInformationMessage's promise only
+    // resolves once the user dismisses the toast (or clicks an action),
+    // which can take arbitrarily long. Callers must not block on this.
+    const showPromise = taskId
+      ? vscode.window.showInformationMessage(`BranchBoard: ${message}`, openLabel)
+      : vscode.window.showInformationMessage(`BranchBoard: ${message}`);
+    void showPromise.then((action) => {
+      if (action === openLabel && taskId) {
+        void vscode.commands.executeCommand("branchBoard.openBoard", { taskId });
+      }
+    });
+  }
+
+  /**
+   * A notification record addressed to the current user arrived via an
+   * external board sync (poll/file-watch) — i.e. someone else's machine
+   * created it. Mirror the same showToast gating that notify() applies on
+   * the machine that performed the action, so behaviour stays consistent
+   * regardless of which side of the conversation you're on.
+   */
+  private handleExternalNotificationRecord(record: BoardNotificationRecord): void {
+    const cfg = this.deps.getConfig().notifications;
+    if (!cfg?.enabled) {
+      Logger.debug(`externalNotification(${record.type}): skipped — notifications.enabled is false`);
+      return;
+    }
+    if (!cfg.showToast) {
+      Logger.debug(`externalNotification(${record.type}): skipped — showToast is false`);
+      return;
+    }
+    Logger.debug(
+      `externalNotification(${record.type}): showing native toast for ${this.currentUserId ?? "null"} (arrived via external sync) — "${record.message}"`
+    );
+    this.showNativeToast(record.message, record.taskId);
   }
 
   /** Build the webview HTML, pointing at the built Vite bundle. */
@@ -1713,7 +2079,7 @@ export class WebviewController {
       `default-src 'none'`,
       `img-src ${this.webview.cspSource} https: data:`,
       `style-src ${this.webview.cspSource} 'unsafe-inline'`,
-      `script-src 'nonce-${nonce}'`,
+      `script-src ${this.webview.cspSource} 'nonce-${nonce}'`,
       `font-src ${this.webview.cspSource}`,
       `media-src ${this.webview.cspSource}`,
     ].join("; ");
@@ -1742,11 +2108,13 @@ export class BoardPanel {
   private controller: WebviewController;
   private disposables: vscode.Disposable[] = [];
 
-  static createOrShow(deps: ControllerDeps, page?: CommandCenterPage) {
+  static createOrShow(deps: ControllerDeps, page?: CommandCenterPage, taskId?: string) {
     const column = vscode.ViewColumn.Active;
     if (BoardPanel.current) {
       BoardPanel.current.panel.reveal(column);
-      if (page) {
+      if (taskId) {
+        BoardPanel.current.controller.focusTask(taskId);
+      } else if (page) {
         BoardPanel.current.controller.navigate(page);
       }
       return;
@@ -1759,7 +2127,9 @@ export class BoardPanel {
     );
     panel.iconPath = vscode.Uri.joinPath(deps.context.extensionUri, "media", "icon.svg");
     BoardPanel.current = new BoardPanel(panel, deps);
-    if (page) {
+    if (taskId) {
+      BoardPanel.current.controller.focusTask(taskId);
+    } else if (page) {
       BoardPanel.current.controller.navigate(page);
     }
   }

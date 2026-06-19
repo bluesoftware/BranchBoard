@@ -1,5 +1,6 @@
 .vscode/**
 .vscode-test/**
+.branchboard/**
 src/**
 out/**/*.map
 webview/node_modules/**
@@ -17,6 +18,8 @@ webview/package-lock.json
 !out/**/*.js
 node_modules/**
 .gitignore
+AGENTS.md
+CLAUDE.md
 Zrzut*.png
 **/*.py
 media/_gen_icon.py
