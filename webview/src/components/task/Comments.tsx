@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import type { BoardTask, BoardUser, TaskComment } from "../../types";
+import type { BoardTask, BoardUser, FileMentionEntry, TaskComment } from "../../types";
 import { t } from "../../i18n";
 import { formatDate } from "../../utils";
 import { FileMentionInput, type FileMentionInputHandle } from "./FileMentionInput";
@@ -12,7 +12,7 @@ interface Props {
   task?: Pick<BoardTask, "assignedUserId" | "createdByUserId">;
   currentUserId: string | null;
   onAdd: (text: string) => void;
-  fileSuggestions?: string[];
+  fileSuggestions?: FileMentionEntry[];
   onSearchFiles?: (query: string) => void;
   onOpenFile?: (path: string) => void;
 }

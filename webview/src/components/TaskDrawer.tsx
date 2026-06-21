@@ -9,9 +9,12 @@ import {
   ChecklistItem,
   CommitFile,
   CommitInfo,
+  FileMentionEntry,
   GitInfo,
   TaskAI,
+  TaskBranchStatePayload,
   TaskPriority,
+  TaskVerificationResultPayload,
   TaskType,
   TASK_TYPES,
 } from "../types";
@@ -34,6 +37,12 @@ interface Props {
   git: GitInfo | null;
   appConfig: AppConfig;
   currentUserId: string | null;
+  /** Live local/origin/dev/prod state of this task's branch; null while loading or no branch. */
+  branchState: TaskBranchStatePayload | null;
+  /** Result of the last "Sprawdź zgodność z rules" run for this task, if any. */
+  verificationResult: TaskVerificationResultPayload | null;
+  verificationRunning: boolean;
+  onRunVerification: () => void;
   events: BoardEvent[];
   branchCommits: CommitInfo[];
   branchFiles: CommitFile[];
@@ -61,7 +70,7 @@ interface Props {
   onOpenExternal: (url: string) => void;
   onOpenFile: (path: string) => void;
   onOpenDiff: (path: string) => void;
-  fileSuggestions: string[];
+  fileSuggestions: FileMentionEntry[];
   onSearchFiles: (query: string) => void;
 }
 
@@ -236,12 +245,16 @@ export function TaskDrawer(props: Props) {
   const { task, board, git, appConfig } = props;
   const [title, setTitle] = useState(task.title);
   const [branchName, setBranchName] = useState(task.branchName);
+  const [showAiNotesInput, setShowAiNotesInput] = useState(false);
+  const [aiNotesDraft, setAiNotesDraft] = useState(task.ai?.aiNotes ?? "");
   const editorFallback = <div className="bb-muted small">{t("app.loading")}</div>;
 
   useEffect(() => {
     setTitle(task.title);
     setBranchName(task.branchName);
-  }, [task.id, task.title, task.branchName]);
+    setAiNotesDraft(task.ai?.aiNotes ?? "");
+    setShowAiNotesInput(false);
+  }, [task.id, task.title, task.branchName, task.ai?.aiNotes]);
 
   const checklist = task.checklist ?? [];
   const productionChecklistLocked = isTaskInProduction(board, task);
@@ -293,6 +306,48 @@ export function TaskDrawer(props: Props) {
     });
     props.onCopyClipboard(text, t("toast.aiPromptCopied"));
     props.onAiPromptCopied();
+  };
+
+  // "Podsumuj zmiany" — builds a ready-to-paste prompt from the real diff
+  // (changed files + commits) against the rules, for a quick AI-assisted
+  // review once the branch is visible to the whole team on origin.
+  const copyChangesSummaryPrompt = () => {
+    const filesText =
+      props.branchFiles.length > 0
+        ? props.branchFiles.map((f) => `${f.status} ${f.path} (+${f.additions}/-${f.deletions})`).join("\n")
+        : t("task.branchBadge.noChangedFiles");
+    const commitsText =
+      props.branchCommits.length > 0
+        ? props.branchCommits.map((c) => `- ${c.subject}`).join("\n")
+        : t("task.branchBadge.noCommits");
+    const text = [
+      t("task.branchBadge.summarizePromptIntro").replace("{branch}", branchName || "-"),
+      "",
+      t("task.branchBadge.summarizePromptFiles"),
+      filesText,
+      "",
+      t("task.branchBadge.summarizePromptCommits"),
+      commitsText,
+      "",
+      t("task.branchBadge.summarizePromptTask"),
+      task.title,
+      "",
+      t("task.branchBadge.summarizePromptRules"),
+    ].join("\n");
+    props.onCopyClipboard(text, t("toast.changesSummaryCopied"));
+  };
+
+  const saveAiNotes = () => {
+    if (aiNotesDraft !== ai.aiNotes) {
+      saveAi({ aiNotes: aiNotesDraft });
+    }
+  };
+
+  const branchBadgeMeta: Record<string, { labelKey: string; tone: string }> = {
+    local: { labelKey: "task.branchBadge.local", tone: "tone-neutral" },
+    origin: { labelKey: "task.branchBadge.origin", tone: "tone-info" },
+    dev: { labelKey: "task.branchBadge.dev", tone: "tone-warning" },
+    prod: { labelKey: "task.branchBadge.prod", tone: "tone-success" },
   };
 
   // Deployment context for this task's branch.
@@ -386,6 +441,103 @@ export function TaskDrawer(props: Props) {
 
         <div className="bb-task-modal-body">
           <main className="bb-task-detail-main">
+            {branchName && (
+              <div className="bb-branch-badges">
+                {props.branchState && (
+                  <span className={`bb-badge ${branchBadgeMeta[props.branchState.state].tone}`}>
+                    {t(branchBadgeMeta[props.branchState.state].labelKey)}
+                  </span>
+                )}
+
+                {/* Local: branch only exists on this machine — push it so it's real for the team. */}
+                {props.branchState?.state === "local" && (
+                  <button
+                    type="button"
+                    className="bb-badge bb-badge-action tone-neutral"
+                    onClick={() => props.onPushBranch(branchName)}
+                    title={t("task.branchBadge.pushHint")}
+                  >
+                    {t("task.pushBranch")}
+                  </button>
+                )}
+
+                {/* Origin: pushed and visible to everyone — offer reviewer-facing AI actions. */}
+                {props.branchState?.state === "origin" && (
+                  <>
+                    <button
+                      type="button"
+                      className="bb-badge bb-badge-action tone-info"
+                      onClick={props.onRunVerification}
+                      disabled={props.verificationRunning}
+                      title={t("task.branchBadge.checkRulesHint")}
+                    >
+                      {props.verificationRunning
+                        ? t("task.branchBadge.checkRulesRunning")
+                        : t("task.branchBadge.checkRules")}
+                    </button>
+                    <button
+                      type="button"
+                      className="bb-badge bb-badge-action tone-info"
+                      onClick={copyChangesSummaryPrompt}
+                      title={t("task.branchBadge.summarizeHint")}
+                    >
+                      {t("task.branchBadge.summarizeChanges")}
+                    </button>
+                    <button
+                      type="button"
+                      className="bb-badge bb-badge-action tone-info"
+                      onClick={() => setShowAiNotesInput((v) => !v)}
+                      title={t("task.branchBadge.pasteAiHint")}
+                    >
+                      {t("task.branchBadge.pasteAiResult")}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {branchName && props.verificationResult && props.verificationResult.taskId === task.id && (
+              <div
+                className={`bb-verification-panel ${props.verificationResult.ok ? "ok" : "fail"}`}
+                role="status"
+              >
+                {props.verificationResult.command ? (
+                  <>
+                    <div className="bb-verification-head">
+                      <strong>
+                        {props.verificationResult.ok
+                          ? t("task.branchBadge.verificationOk")
+                          : t("task.branchBadge.verificationFail")}
+                      </strong>
+                      <code>{props.verificationResult.command}</code>
+                    </div>
+                    {props.verificationResult.detail && (
+                      <pre className="bb-verification-detail">{props.verificationResult.detail}</pre>
+                    )}
+                  </>
+                ) : (
+                  <span>{t("task.branchBadge.noVerifyCommand")}</span>
+                )}
+              </div>
+            )}
+
+            {branchName && showAiNotesInput && (
+              <div className="bb-ai-notes-panel">
+                <label className="bb-ai-notes-label" htmlFor="bb-ai-notes-input">
+                  {t("task.branchBadge.aiNotesLabel")}
+                </label>
+                <textarea
+                  id="bb-ai-notes-input"
+                  className="bb-ai-notes-textarea"
+                  value={aiNotesDraft}
+                  placeholder={t("task.branchBadge.aiNotesPlaceholder")}
+                  onChange={(e) => setAiNotesDraft(e.target.value)}
+                  onBlur={saveAiNotes}
+                  rows={5}
+                />
+              </div>
+            )}
+
             <section className="bb-task-title-panel">
               <button
                 type="button"

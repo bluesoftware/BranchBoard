@@ -1,5 +1,5 @@
 import { execFile } from "child_process";
-import { BoardTask, BranchBoardConfig, GitInfo, OperationResult } from "../types";
+import { BoardTask, BranchBoardConfig, BranchLocationState, FileMentionEntry, GitInfo, OperationResult } from "../types";
 import { SafetyService } from "./SafetyService";
 
 interface GitExecResult {
@@ -338,6 +338,76 @@ export class GitService {
     };
   }
 
+  /**
+   * True if `branchRef` is an ancestor of `targetBranch` — i.e. it has been
+   * merged into it (fast-forward or via merge commit, doesn't matter).
+   * Safe by construction: a missing ref or unrelated history just returns
+   * false, never throws.
+   */
+  async isBranchMergedInto(branchRef: string, targetBranch: string): Promise<boolean> {
+    if (!branchRef || !targetBranch || branchRef === targetBranch) {
+      return false;
+    }
+    try {
+      await this.run(["merge-base", "--is-ancestor", branchRef, targetBranch]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Picks the right ref to inspect a branch by: prefer the local branch (it
+   * has the developer's latest commits), fall back to the remote-tracking
+   * ref if it only exists on origin, or null if neither exists (e.g. the
+   * branch was deleted after merge).
+   */
+  private resolveBranchRef(branchName: string, existsLocal: boolean, existsRemote: boolean): string | null {
+    if (existsLocal) {
+      return branchName;
+    }
+    if (existsRemote) {
+      const remote = this.getConfig().remoteName || "origin";
+      return `${remote}/${branchName}`;
+    }
+    return null;
+  }
+
+  /**
+   * Live, Git-truth location of a task's branch — see BranchLocationState in
+   * types.ts. This is deliberately computed on demand from Git, never
+   * persisted: it can never go stale or contradict reality.
+   *  - "prod"   the branch is merged into main.
+   *  - "dev"    (only when a dev branch is configured) merged into dev, not main.
+   *  - "origin" pushed to the remote, visible to the whole team, not merged anywhere.
+   *  - "local"  exists only on this machine (or doesn't exist at all yet).
+   */
+  async getBranchLocationState(branchName: string): Promise<BranchLocationState> {
+    if (!branchName) {
+      return "local";
+    }
+    const config = this.getConfig();
+    const mainBranch = await this.getMainBranch();
+    const stats = await this.getBranchStats(branchName, mainBranch);
+    const ref = this.resolveBranchRef(branchName, stats.existsLocal, stats.existsRemote);
+    if (!ref) {
+      return "local";
+    }
+
+    if (await this.isBranchMergedInto(ref, mainBranch)) {
+      return "prod";
+    }
+
+    if (config.useDevBranch) {
+      const devBranch = config.devBranch || "dev";
+      if (await this.isBranchMergedInto(ref, devBranch)) {
+        return "dev";
+      }
+    }
+
+    return stats.existsRemote ? "origin" : "local";
+  }
+
   /** Absolute working-directory path (workspace root). */
   getCwd(): string {
     return this.cwd;
@@ -620,6 +690,125 @@ export class GitService {
         .sort((a, b) => a.score - b.score || a.file.length - b.file.length || a.file.localeCompare(b.file))
         .slice(0, limit)
         .map((entry) => entry.file);
+    } catch {
+      return [];
+    }
+  }
+
+  /** File extensions recognized as an "extension token" right after "@", longest first so "tsx" wins over "ts". */
+  private static readonly MENTION_EXTENSIONS = [
+    "tsx", "jsx", "mjs", "cjs", "scss", "json", "yaml", "html", "java", "kt",
+    "vue", "less", "mdx", "yml", "sql", "cpp", "hpp", "ts", "js", "py", "rb",
+    "go", "rs", "php", "css", "md", "sh", "c", "h",
+  ].sort((a, b) => b.length - a.length);
+
+  /** Detects a known extension token at the start of `leaf`, e.g. "phpprod" -> {ext:"php", rest:"prod"}. */
+  private detectMentionExtension(leaf: string): { ext: string; rest: string } | null {
+    const lower = leaf.toLowerCase();
+    for (const ext of GitService.MENTION_EXTENSIONS) {
+      if (lower.startsWith(ext)) {
+        return { ext, rest: leaf.slice(ext.length) };
+      }
+    }
+    return null;
+  }
+
+  /** All directory paths implied by a flat file list, e.g. "src/a/b.ts" -> "src", "src/a". */
+  private collectDirectories(files: string[]): string[] {
+    const dirs = new Set<string>();
+    for (const file of files) {
+      const parts = file.split("/");
+      let acc = "";
+      for (let i = 0; i < parts.length - 1; i++) {
+        acc = acc ? `${acc}/${parts[i]}` : parts[i];
+        dirs.add(acc);
+      }
+    }
+    return Array.from(dirs);
+  }
+
+  /** Immediate children (dirs first, then files) of `dirPrefix` (repo-relative, trailing "/" or ""). */
+  private listDirChildren(files: string[], dirPrefix: string, limit: number): FileMentionEntry[] {
+    const prefixLower = dirPrefix.toLowerCase();
+    const dirs = new Set<string>();
+    const childFiles: string[] = [];
+    for (const file of files) {
+      if (dirPrefix && !file.toLowerCase().startsWith(prefixLower)) {
+        continue;
+      }
+      const rest = dirPrefix ? file.slice(dirPrefix.length) : file;
+      if (!rest) {
+        continue;
+      }
+      const slashIdx = rest.indexOf("/");
+      if (slashIdx >= 0) {
+        dirs.add(dirPrefix + rest.slice(0, slashIdx));
+      } else {
+        childFiles.push(dirPrefix + rest);
+      }
+    }
+    const dirEntries: FileMentionEntry[] = Array.from(dirs)
+      .sort((a, b) => a.localeCompare(b))
+      .map((path) => ({ path, type: "dir" as const }));
+    const fileEntries: FileMentionEntry[] = childFiles
+      .sort((a, b) => a.localeCompare(b))
+      .map((path) => ({ path, type: "file" as const }));
+    return [...dirEntries, ...fileEntries].slice(0, limit);
+  }
+
+  /**
+   * "@" file mention search: directory-aware and extension-token-aware.
+   *  - Empty query (or a query ending in "/") -> browse: lists the immediate
+   *    directories and files under the typed path, dirs first.
+   *  - A known extension at the start of the last path segment (e.g. "php",
+   *    "js", "tsx") -> filters to files with that extension, then fuzzy-
+   *    narrows by whatever follows the extension (e.g. "phpprod" -> .php
+   *    files fuzzy-matched against "prod").
+   *  - Anything else -> falls back to fuzzy matching across both files and
+   *    directories using the existing layered scorer.
+   */
+  async searchFileMentions(query = "", limit = 10): Promise<FileMentionEntry[]> {
+    try {
+      const raw = query ?? "";
+      const lastSlash = raw.lastIndexOf("/");
+      const dirPrefix = lastSlash >= 0 ? raw.slice(0, lastSlash + 1) : "";
+      const leaf = lastSlash >= 0 ? raw.slice(lastSlash + 1) : raw;
+      const all = await this.getFileIndex();
+
+      if (!leaf) {
+        return this.listDirChildren(all, dirPrefix, limit);
+      }
+
+      const extToken = this.detectMentionExtension(leaf);
+      if (extToken) {
+        const suffix = `.${extToken.ext}`.toLowerCase();
+        const prefixLower = dirPrefix.toLowerCase();
+        const filtered = all.filter(
+          (file) => file.toLowerCase().endsWith(suffix) && file.toLowerCase().startsWith(prefixLower),
+        );
+        const rest = extToken.rest.trim();
+        const scored = rest
+          ? filtered
+              .map((file) => ({ file, score: this.fileMatchScore(file, rest) }))
+              .filter((entry) => Number.isFinite(entry.score))
+          : filtered.map((file) => ({ file, score: file.length }));
+        if (scored.length) {
+          scored.sort((a, b) => a.score - b.score || a.file.localeCompare(b.file));
+          return scored.slice(0, limit).map((entry) => ({ path: entry.file, type: "file" as const }));
+        }
+        // No file matched that extension — fall through to the general fuzzy search below.
+      }
+
+      const dirCandidates: FileMentionEntry[] = this.collectDirectories(all).map((path) => ({
+        path,
+        type: "dir" as const,
+      }));
+      const fileCandidates: FileMentionEntry[] = all.map((path) => ({ path, type: "file" as const }));
+      const scored = [...dirCandidates, ...fileCandidates]
+        .map((entry) => ({ ...entry, score: this.fileMatchScore(entry.path, raw) }))
+        .filter((entry) => Number.isFinite(entry.score));
+      scored.sort((a, b) => a.score - b.score || a.path.localeCompare(b.path));
+      return scored.slice(0, limit).map(({ path, type }) => ({ path, type }));
     } catch {
       return [];
     }

@@ -1,6 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { t } from "../../i18n";
+import { FileIcon, FolderIcon } from "../Icons";
+import type { FileMentionEntry } from "../../types";
 
 export interface FileMentionInputHandle {
   focus: () => void;
@@ -15,6 +17,16 @@ export interface FileMentionInputHandle {
  * title/checklist/comment storage into rich HTML, which are plain strings
  * used directly in many other places (branch name suggestions, search,
  * dashboards, etc.).
+ *
+ * Behavior:
+ *  - typing a bare "@" browses the repo root: directories first, then files,
+ *    each with a distinct icon.
+ *  - typing a known extension right after "@" (e.g. "@php", "@js", "@tsx")
+ *    filters to files with that extension; anything typed after the
+ *    extension (e.g. "@phpprod") fuzzy-narrows by name within that set.
+ *  - picking a directory inserts "<path>/" and keeps the menu open, scoped
+ *    to that directory's contents, so you can keep drilling in.
+ *  - picking a file inserts "@<path> " and closes the menu.
  */
 
 const FILE_MENTION_LOOKBEHIND_RE = /(?:^|\s)@([^\s@]*)$/;
@@ -23,7 +35,7 @@ interface Props {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  fileSuggestions: string[];
+  fileSuggestions: FileMentionEntry[];
   onSearchFiles: (query: string) => void;
   multiline?: boolean;
   autoGrow?: boolean;
@@ -71,7 +83,7 @@ export const FileMentionInput = forwardRef<FileMentionInputHandle, Props>(functi
   const [mentionRange, setMentionRange] = useState<{ start: number; end: number } | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
-  const suggestionsRef = useRef<string[]>([]);
+  const suggestionsRef = useRef<FileMentionEntry[]>([]);
 
   useEffect(() => {
     suggestionsRef.current = fileSuggestions;
@@ -83,12 +95,12 @@ export const FileMentionInput = forwardRef<FileMentionInputHandle, Props>(functi
   }, [selectedIndex]);
 
   useEffect(() => {
-    if (mentionQuery.trim().length < 1) {
+    if (!mentionRange) {
       return undefined;
     }
     const timer = window.setTimeout(() => onSearchFiles(mentionQuery), 90);
     return () => window.clearTimeout(timer);
-  }, [mentionQuery, onSearchFiles]);
+  }, [mentionQuery, mentionRange, onSearchFiles]);
 
   useEffect(() => {
     if (autoGrow && multiline) {
@@ -103,12 +115,12 @@ export const FileMentionInput = forwardRef<FileMentionInputHandle, Props>(functi
   const updateMentionState = (cursor: number, text: string) => {
     const lookBehind = text.slice(0, cursor);
     const match = lookBehind.match(FILE_MENTION_LOOKBEHIND_RE);
-    const query = match?.[1] ?? "";
-    if (!match || query.length < 1) {
+    if (!match) {
       setMentionQuery("");
       setMentionRange(null);
       return;
     }
+    const query = match[1] ?? "";
     setMentionQuery(query);
     setMentionRange({ start: cursor - query.length - 1, end: cursor });
     setSelectedIndex(0);
@@ -132,14 +144,35 @@ export const FileMentionInput = forwardRef<FileMentionInputHandle, Props>(functi
     });
   };
 
-  const insertMention = (filePath: string) => {
+  const insertMention = (entry: FileMentionEntry) => {
     const range = mentionRange;
     if (!range) {
       return;
     }
     const before = value.slice(0, range.start);
     const after = value.slice(range.end);
-    const insertion = `@${filePath} `;
+
+    if (entry.type === "dir") {
+      // Drill into the directory: insert "<path>/" and keep the mention
+      // active, scoped to that directory's contents, instead of closing it.
+      const insertion = `@${entry.path}/`;
+      const nextValue = `${before}${insertion}${after}`;
+      const newCursor = before.length + insertion.length;
+      onChange(nextValue);
+      setSelectedIndex(0);
+      setMentionRange({ start: range.start, end: newCursor });
+      setMentionQuery(`${entry.path}/`);
+      window.setTimeout(() => {
+        const el = elementRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(newCursor, newCursor);
+        }
+      }, 0);
+      return;
+    }
+
+    const insertion = `@${entry.path} `;
     const nextValue = `${before}${insertion}${after}`;
     onChange(nextValue);
     setMentionQuery("");
@@ -156,7 +189,7 @@ export const FileMentionInput = forwardRef<FileMentionInputHandle, Props>(functi
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     const suggestions = suggestionsRef.current;
-    const mentionActive = !!mentionQuery && suggestions.length > 0;
+    const mentionActive = !!mentionRange && suggestions.length > 0;
 
     if (mentionActive) {
       if (event.key === "ArrowDown") {
@@ -225,6 +258,8 @@ export const FileMentionInput = forwardRef<FileMentionInputHandle, Props>(functi
     onFocus,
   };
 
+  const mentionOpen = !!mentionRange && fileSuggestions.length > 0;
+
   return (
     <div className="bb-file-mention-input-shell">
       {multiline ? (
@@ -232,20 +267,30 @@ export const FileMentionInput = forwardRef<FileMentionInputHandle, Props>(functi
       ) : (
         <input ref={elementRef as React.Ref<HTMLInputElement>} {...sharedProps} />
       )}
-      {mentionQuery && fileSuggestions.length > 0 && (
+      {mentionOpen && (
         <div className="bb-file-mention-menu" role="listbox" aria-label={t("task.fileMentionSuggestions")}>
-          {fileSuggestions.slice(0, 8).map((filePath, index) => (
+          {fileSuggestions.slice(0, 8).map((entry, index) => (
             <button
-              key={filePath}
+              key={`${entry.type}:${entry.path}`}
               type="button"
-              className={`bb-file-mention-item ${index === selectedIndex ? "active" : ""}`}
+              className={`bb-file-mention-item ${entry.type === "dir" ? "is-dir" : "is-file"} ${
+                index === selectedIndex ? "active" : ""
+              }`}
               onMouseDown={(event) => {
                 event.preventDefault();
-                insertMention(filePath);
+                insertMention(entry);
               }}
             >
-              <span className="bb-file-mention-name">{filePath.slice(filePath.lastIndexOf("/") + 1)}</span>
-              <span className="bb-file-mention-path">{filePath}</span>
+              {entry.type === "dir" ? (
+                <FolderIcon size={12} style={{ flexShrink: 0, opacity: 0.85 }} />
+              ) : (
+                <FileIcon size={12} style={{ flexShrink: 0, opacity: 0.7 }} />
+              )}
+              <span className="bb-file-mention-name">
+                {entry.path.slice(entry.path.lastIndexOf("/") + 1)}
+                {entry.type === "dir" ? "/" : ""}
+              </span>
+              <span className="bb-file-mention-path">{entry.path}</span>
             </button>
           ))}
         </div>

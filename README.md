@@ -115,6 +115,33 @@ command — plus rules that tell the agent to inspect the code first, make a pla
 change only what's needed, and keep commits focused. The template is fully
 editable in Settings.
 
+### Branch location badges: local · origin · dev · prod
+
+This is the feature built specifically for small teams shipping AI-written code
+on one repo. Every task with a branch shows a live, never-stale **location
+badge** above its title, computed straight from Git (not stored, so it can
+never lie):
+
+- **local** — only on your machine, nobody else can see it.
+- **origin** — pushed, visible to the whole team.
+- **dev** — merged into your dev/staging branch.
+- **prod** — merged into `main`.
+
+The moment a branch reaches **origin**, three clickable action badges appear
+right next to it — no terminal, no tab-switching:
+
+- **Check rules compliance** — runs your configured build/lint/test command and
+  shows pass/fail with full output inline.
+- **Summarize changes** — copies an AI prompt built from the branch's changed
+  files and commits, ready to paste into Cursor/Claude/Copilot.
+- **Paste AI result** — drop the AI's output (a rules check, a summary, a
+  review) directly onto the task so a reviewer sees everything without leaving
+  it.
+
+This is the exact decision point small AI-coding teams burn time on — "is this
+branch actually safe to send to `main`?" — answered on the card, in seconds,
+instead of in a separate terminal, PR description, or Slack thread.
+
 See [docs/AI_WORKFLOW.md](docs/AI_WORKFLOW.md).
 
 ## Git safety
@@ -138,7 +165,7 @@ Dostępne języki: **Polski**, **English**.
 Install from a packaged `.vsix`:
 
 ```bash
-code --install-extension branchboard-0.2.0.vsix
+code --install-extension branchboard-0.3.0.vsix
 ```
 
 …or run from source (see below) and press `F5`.

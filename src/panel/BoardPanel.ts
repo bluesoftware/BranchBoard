@@ -269,6 +269,89 @@ export class WebviewController {
     this.post({ type: "gitInfo", payload: { git: info, currentUserId } });
   }
 
+  /**
+   * Live Git-truth location of one task's branch (local/origin/dev/prod),
+   * pushed on demand when the task drawer opens. Never persisted, never
+   * blocks the dashboard pipeline — a single, cheap, on-request lookup.
+   */
+  private async postTaskBranchState(taskId: string, branchName: string) {
+    if (!taskId) {
+      return;
+    }
+    if (!branchName) {
+      this.post({
+        type: "taskBranchState",
+        payload: { taskId, branchName: "", state: "local", existsLocal: false, existsRemote: false, ahead: 0, behind: 0 },
+      });
+      return;
+    }
+    try {
+      const main = await this.deps.git.getMainBranch();
+      const [state, stats] = await Promise.all([
+        this.deps.git.getBranchLocationState(branchName),
+        this.deps.git.getBranchStats(branchName, main),
+      ]);
+      this.post({
+        type: "taskBranchState",
+        payload: {
+          taskId,
+          branchName,
+          state,
+          existsLocal: stats.existsLocal,
+          existsRemote: stats.existsRemote,
+          ahead: stats.ahead,
+          behind: stats.behind,
+        },
+      });
+    } catch (err: any) {
+      // Degrade gracefully: badges just don't render rather than erroring the drawer.
+      this.post({
+        type: "taskBranchState",
+        payload: { taskId, branchName, state: "local", existsLocal: false, existsRemote: false, ahead: 0, behind: 0 },
+      });
+    }
+  }
+
+  /**
+   * "Sprawdź zgodność z rules" — runs the same pre-finish command used by
+   * the safe finish-task flow (branchBoard.runCommandBeforeFinish), but on
+   * demand from the task drawer once the branch is on origin, so a reviewer
+   * can see a real pass/fail before approving — not just a prompt.
+   * Reuses GitService.runCommand verbatim: same trusted, admin-configured
+   * command, same execFile-no-shell guarantees, no new attack surface.
+   */
+  private async runTaskVerification(taskId: string) {
+    if (!taskId) {
+      return;
+    }
+    const config = this.deps.getConfig();
+    const command = (config.runCommandBeforeFinish || "").trim();
+    const ranAt = new Date().toISOString();
+    if (!command) {
+      this.post({
+        type: "taskVerificationResult",
+        payload: { taskId, ok: false, command: "", message: "", detail: "", ranAt },
+      });
+      return;
+    }
+    const result = await this.deps.git.runCommand(command);
+    this.post({
+      type: "taskVerificationResult",
+      payload: {
+        taskId,
+        ok: result.ok,
+        command,
+        message: result.message,
+        detail: result.detail || "",
+        ranAt,
+      },
+    });
+    await this.deps.board.logEvent(result.ok ? "task_updated" : "merge_failed", {
+      taskId,
+      payload: { kind: "rules_verification", ok: result.ok, command },
+    });
+  }
+
   /** Compute and push the full Command Center dashboard payload. */
   private async postDashboard() {
     this.dashboardRequested = true;
@@ -1093,9 +1176,9 @@ export class WebviewController {
 
         case "searchFiles": {
           const query = String(msg.payload?.query ?? "");
-          // Empty query => return nothing (avoid loading the whole repo into the
-          // suggestion list, which lags typing). Cap matches to 10.
-          const files = query.trim().length >= 1 ? await git.listTrackedFiles(query, 10) : [];
+          // Empty/blank query is valid here: it means "just typed @", which
+          // should browse the repo root (directories first, then files).
+          const files = await git.searchFileMentions(query, 10);
           this.post({ type: "fileList", payload: { query, files } });
           break;
         }
@@ -1381,6 +1464,17 @@ export class WebviewController {
 
         case "getGitInfo":
           await this.postGitInfo();
+          break;
+
+        case "getTaskBranchState":
+          await this.postTaskBranchState(
+            String(msg.payload?.taskId ?? ""),
+            String(msg.payload?.branchName ?? "")
+          );
+          break;
+
+        case "runTaskVerification":
+          await this.runTaskVerification(String(msg.payload?.taskId ?? ""));
           break;
 
         case "createTask": {

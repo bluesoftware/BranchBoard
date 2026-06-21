@@ -9,12 +9,14 @@ import type { Editor } from "@tiptap/react";
 import { t } from "../../i18n";
 import { normalizeRichTextHtml, sanitizeRichTextHtml } from "../../richText";
 import { FILE_MENTION_RE, shouldLinkFileMention } from "../../fileMentionDisplay";
+import { FileIcon, FolderIcon } from "../Icons";
+import type { FileMentionEntry } from "../../types";
 
 interface Props {
   value: string;
   placeholder: string;
   onSave: (value: string) => void;
-  fileSuggestions: string[];
+  fileSuggestions: FileMentionEntry[];
   onSearchFiles: (query: string) => void;
   onOpenFile: (path: string) => void;
 }
@@ -128,12 +130,13 @@ export function RichDescription({ value, placeholder, onSave, fileSuggestions, o
   const [linkInputOpen, setLinkInputOpen] = useState(false);
   const [linkInputValue, setLinkInputValue] = useState("");
   const [fileMentionQuery, setFileMentionQuery] = useState("");
+  const [fileMentionActive, setFileMentionActive] = useState(false);
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const linkInputRef = useRef<HTMLInputElement | null>(null);
   const linkRangeRef = useRef<TextSelectionRange | null>(null);
   const fileMentionRangeRef = useRef<TextSelectionRange | null>(null);
-  const fileMentionQueryRef = useRef("");
-  const fileSuggestionsRef = useRef<string[]>([]);
+  const fileMentionActiveRef = useRef(false);
+  const fileSuggestionsRef = useRef<FileMentionEntry[]>([]);
   const selectedFileIndexRef = useRef(0);
   const editorRef = useRef<Editor | null>(null);
 
@@ -147,21 +150,22 @@ export function RichDescription({ value, placeholder, onSave, fileSuggestions, o
   }, [selectedFileIndex]);
 
   useEffect(() => {
-    fileMentionQueryRef.current = fileMentionQuery;
-  }, [fileMentionQuery]);
+    fileMentionActiveRef.current = fileMentionActive;
+  }, [fileMentionActive]);
 
   useEffect(() => {
-    if (!editing || fileMentionQuery.trim().length < 1) {
+    if (!editing || !fileMentionActive) {
       return undefined;
     }
     const timer = window.setTimeout(() => onSearchFiles(fileMentionQuery), 90);
     return () => window.clearTimeout(timer);
-  }, [editing, fileMentionQuery, onSearchFiles]);
+  }, [editing, fileMentionActive, fileMentionQuery, onSearchFiles]);
 
   const updateFileMentionState = (activeEditor: Editor) => {
     const selection = activeEditor.state.selection;
     if (!selection.empty) {
       fileMentionRangeRef.current = null;
+      setFileMentionActive(false);
       setFileMentionQuery("");
       return;
     }
@@ -169,14 +173,16 @@ export function RichDescription({ value, placeholder, onSave, fileSuggestions, o
     const from = selection.from;
     const lookBehind = activeEditor.state.doc.textBetween(Math.max(0, from - 240), from, "\n", "\n");
     const match = lookBehind.match(/(?:^|\s)@([^\s@]*)$/);
-    const query = match?.[1] ?? "";
-    if (!match || query.length < 1) {
+    if (!match) {
       fileMentionRangeRef.current = null;
+      setFileMentionActive(false);
       setFileMentionQuery("");
       return;
     }
 
+    const query = match[1] ?? "";
     fileMentionRangeRef.current = { from: from - query.length - 1, to: from };
+    setFileMentionActive(true);
     setFileMentionQuery(query);
     setSelectedFileIndex(0);
   };
@@ -193,12 +199,25 @@ export function RichDescription({ value, placeholder, onSave, fileSuggestions, o
     });
   };
 
-  const insertFileMention = (filePath: string) => {
+  const insertFileMention = (entry: FileMentionEntry) => {
     const range = fileMentionRangeRef.current;
     const activeEditor = editorRef.current;
     if (!activeEditor || !range) {
       return;
     }
+
+    if (entry.type === "dir") {
+      // Drill into the directory: insert plain "<path>/" text and keep the
+      // mention active, scoped to that directory, instead of closing it.
+      const text = `@${entry.path}/`;
+      activeEditor.chain().focus().deleteRange(range).insertContent([{ type: "text", text }]).run();
+      fileMentionRangeRef.current = { from: range.from, to: range.from + text.length };
+      setSelectedFileIndex(0);
+      setFileMentionActive(true);
+      setFileMentionQuery(`${entry.path}/`);
+      return;
+    }
+
     activeEditor
       .chain()
       .focus()
@@ -206,13 +225,14 @@ export function RichDescription({ value, placeholder, onSave, fileSuggestions, o
       .insertContent([
         {
           type: "text",
-          text: `@${filePath}`,
-          marks: [{ type: "link", attrs: { href: fileMentionHref(filePath), target: null, rel: null } }],
+          text: `@${entry.path}`,
+          marks: [{ type: "link", attrs: { href: fileMentionHref(entry.path), target: null, rel: null } }],
         },
         { type: "text", text: " " },
       ])
       .run();
     setFileMentionQuery("");
+    setFileMentionActive(false);
     fileMentionRangeRef.current = null;
   };
 
@@ -245,7 +265,7 @@ export function RichDescription({ value, placeholder, onSave, fileSuggestions, o
       },
       handleKeyDown: (_view, event) => {
         const suggestions = fileSuggestionsRef.current;
-        if (!fileMentionQueryRef.current || suggestions.length === 0) {
+        if (!fileMentionActiveRef.current || suggestions.length === 0) {
           return false;
         }
         if (event.key === "ArrowDown") {
@@ -266,6 +286,7 @@ export function RichDescription({ value, placeholder, onSave, fileSuggestions, o
         if (event.key === "Escape") {
           event.preventDefault();
           setFileMentionQuery("");
+          setFileMentionActive(false);
           fileMentionRangeRef.current = null;
           return true;
         }
@@ -474,20 +495,30 @@ export function RichDescription({ value, placeholder, onSave, fileSuggestions, o
         </BubbleMenu>
       )}
       <EditorContent editor={editor} />
-      {editing && fileMentionQuery && fileSuggestions.length > 0 && (
+      {editing && fileMentionActive && fileSuggestions.length > 0 && (
         <div className="bb-file-mention-menu" role="listbox" aria-label={t("task.fileMentionSuggestions")}>
-          {fileSuggestions.slice(0, 8).map((filePath, index) => (
+          {fileSuggestions.slice(0, 8).map((entry, index) => (
             <button
-              key={filePath}
+              key={`${entry.type}:${entry.path}`}
               type="button"
-              className={`bb-file-mention-item ${index === selectedFileIndex ? "active" : ""}`}
+              className={`bb-file-mention-item ${entry.type === "dir" ? "is-dir" : "is-file"} ${
+                index === selectedFileIndex ? "active" : ""
+              }`}
               onMouseDown={(event) => {
                 event.preventDefault();
-                insertFileMention(filePath);
+                insertFileMention(entry);
               }}
             >
-              <span className="bb-file-mention-name">{filePath.slice(filePath.lastIndexOf("/") + 1)}</span>
-              <span className="bb-file-mention-path">{filePath}</span>
+              {entry.type === "dir" ? (
+                <FolderIcon size={12} style={{ flexShrink: 0, opacity: 0.85 }} />
+              ) : (
+                <FileIcon size={12} style={{ flexShrink: 0, opacity: 0.7 }} />
+              )}
+              <span className="bb-file-mention-name">
+                {entry.path.slice(entry.path.lastIndexOf("/") + 1)}
+                {entry.type === "dir" ? "/" : ""}
+              </span>
+              <span className="bb-file-mention-path">{entry.path}</span>
             </button>
           ))}
         </div>

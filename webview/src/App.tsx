@@ -10,7 +10,10 @@ import {
   CommitDetail,
   ConnectionTestResult,
   DashboardData,
+  FileMentionEntry,
   GitInfo,
+  TaskBranchStatePayload,
+  TaskVerificationResultPayload,
   UserFilter,
 } from "./types";
 import { post, vscode } from "./vscode";
@@ -158,9 +161,12 @@ export function App() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [branchDetail, setBranchDetail] = useState<BranchDetail | null>(null);
   const [branchDetailLoading, setBranchDetailLoading] = useState(false);
+  const [taskBranchState, setTaskBranchState] = useState<TaskBranchStatePayload | null>(null);
+  const [verificationResult, setVerificationResult] = useState<TaskVerificationResultPayload | null>(null);
+  const [verificationRunning, setVerificationRunning] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionTestResult | null>(null);
   const [connectionTesting, setConnectionTesting] = useState(false);
-  const [fileSuggestions, setFileSuggestions] = useState<string[]>([]);
+  const [fileSuggestions, setFileSuggestions] = useState<FileMentionEntry[]>([]);
   const [branchMapGraph, setBranchMapGraph] = useState<BranchMapGraph | null>(null);
   const [branchMapGraphLoading, setBranchMapGraphLoading] = useState(false);
   const [commitDetail, setCommitDetail] = useState<CommitDetail | null>(null);
@@ -194,12 +200,19 @@ export function App() {
           setBranchDetail(msg.payload as BranchDetail);
           setBranchDetailLoading(false);
           break;
+        case "taskBranchState":
+          setTaskBranchState(msg.payload as TaskBranchStatePayload);
+          break;
+        case "taskVerificationResult":
+          setVerificationResult(msg.payload as TaskVerificationResultPayload);
+          setVerificationRunning(false);
+          break;
         case "connectionStatus":
           setConnectionStatus(msg.payload as ConnectionTestResult);
           setConnectionTesting(false);
           break;
         case "fileList":
-          setFileSuggestions((msg.payload?.files as string[]) ?? []);
+          setFileSuggestions((msg.payload?.files as FileMentionEntry[]) ?? []);
           break;
         case "branchMapGraph":
           setBranchMapGraph(msg.payload as BranchMapGraph);
@@ -576,8 +589,11 @@ export function App() {
   const openTask = (taskId: string) => {
     setActiveTaskId(taskId);
     const tk = board.tasks.find((x) => x.id === taskId);
+    setTaskBranchState(null);
+    setVerificationResult(null);
     if (tk?.branchName) {
       requestBranchDetail(tk.branchName);
+      post("getTaskBranchState", { taskId, branchName: tk.branchName });
     }
     // Clears the green "unread comments" indicator on the card now that the
     // user is looking at this task's chat.
@@ -649,6 +665,24 @@ export function App() {
   const activeBranchFiles = detailMatches ? branchDetail!.files : [];
   const activeBranchFilesLoading =
     !!activeTask && !!activeTask.branchName && branchDetailLoading && !detailMatches;
+  // Live local/origin/dev/prod badge state for the open task — only when the
+  // last reply actually matches it (task may have changed branch since).
+  const activeBranchState =
+    !!activeTask &&
+    !!taskBranchState &&
+    taskBranchState.taskId === activeTask.id &&
+    taskBranchState.branchName === activeTask.branchName
+      ? taskBranchState
+      : null;
+  const activeVerificationResult =
+    !!activeTask && !!verificationResult && verificationResult.taskId === activeTask.id
+      ? verificationResult
+      : null;
+  const runTaskVerification = (taskId: string) => {
+    setVerificationRunning(true);
+    setVerificationResult(null);
+    post("runTaskVerification", { taskId });
+  };
 
   // Task editor as a top-level overlay — rendered over ANY page so opening a
   // task never forces a switch to the board view.
@@ -664,6 +698,10 @@ export function App() {
           git={git}
           appConfig={appConfig}
           currentUserId={currentUserId}
+          branchState={activeBranchState}
+          verificationResult={activeVerificationResult}
+          verificationRunning={verificationRunning}
+          onRunVerification={() => runTaskVerification(activeTask.id)}
           events={board.events}
           branchCommits={activeBranchCommits}
           branchFiles={activeBranchFiles}

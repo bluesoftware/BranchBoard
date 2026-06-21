@@ -10,6 +10,15 @@ export const TASK_TYPES: TaskType[] = ["feature", "bugfix", "hotfix", "chore", "
 
 export type GitStage = "none" | "feature" | "review" | "staging" | "production";
 
+/** Live Git-truth location of a task's branch (see src/types.ts for details). */
+export type BranchLocationState = "local" | "origin" | "dev" | "prod";
+
+/** One entry returned for the "@" file mention picker. Mirrors src/types.ts. */
+export interface FileMentionEntry {
+  path: string;
+  type: "file" | "dir";
+}
+
 export interface ColumnHook {
   id: string;
   label: string;
@@ -327,6 +336,27 @@ export interface BranchDetail {
   totalAdditions: number;
   totalDeletions: number;
   error?: string;
+}
+
+/** Live branch-location payload for a single task — see BranchLocationState. */
+export interface TaskBranchStatePayload {
+  taskId: string;
+  branchName: string;
+  state: BranchLocationState;
+  existsLocal: boolean;
+  existsRemote: boolean;
+  ahead: number;
+  behind: number;
+}
+
+/** Result of running the configured "rules check" command for a task. */
+export interface TaskVerificationResultPayload {
+  taskId: string;
+  ok: boolean;
+  command: string;
+  message: string;
+  detail: string;
+  ranAt: string;
 }
 
 export interface AiTaskRow {

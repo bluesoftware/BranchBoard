@@ -1465,8 +1465,8 @@ select.bb-input {
 }
 .bb-file-mention-item {
   display: grid;
-  grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.2fr);
-  gap: 10px;
+  grid-template-columns: auto minmax(120px, 0.8fr) minmax(0, 1.2fr);
+  gap: 8px;
   align-items: center;
   width: 100%;
   padding: 8px 10px;
@@ -1481,6 +1481,13 @@ select.bb-input {
 .bb-file-mention-item.active {
   background: rgba(125, 211, 252, 0.13);
   color: #ffffff;
+}
+.bb-file-mention-item.is-dir .bb-file-mention-name {
+  color: #7dd3fc;
+}
+.bb-file-mention-item.is-dir:hover,
+.bb-file-mention-item.is-dir.active {
+  background: rgba(125, 211, 252, 0.2);
 }
 .bb-file-mention-name {
   overflow: hidden;
@@ -1580,6 +1587,132 @@ select.bb-input {
   gap: 26px;
   padding-left: 44px;
 }
+
+/* Branch location badges (local/origin/dev/prod) + AI action badges */
+.bb-branch-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.bb-badge-action {
+  cursor: pointer;
+  border: 1px solid var(--bb-border-strong);
+  background: var(--bb-surface-hover);
+  color: rgba(255, 255, 255, 0.86);
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+.bb-badge-action:hover:not(:disabled) {
+  border-color: var(--bb-accent);
+  background: var(--bb-accent-soft);
+  color: var(--bb-accent);
+}
+.bb-badge-action:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.bb-badge-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.bb-badge-action.tone-success {
+  border-color: color-mix(in srgb, var(--bb-success) 45%, var(--bb-border-strong));
+}
+.bb-badge-action.tone-success:hover:not(:disabled) {
+  border-color: var(--bb-success);
+  background: color-mix(in srgb, var(--bb-success) 18%, transparent);
+  color: var(--bb-success);
+}
+
+/* Rules verification result panel */
+.bb-verification-panel {
+  border: 1px solid var(--bb-border);
+  border-left-width: 3px;
+  border-radius: var(--bb-radius-sm);
+  background: var(--bb-card);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bb-verification-panel.ok {
+  border-left-color: var(--bb-success);
+}
+.bb-verification-panel.fail {
+  border-left-color: var(--bb-danger);
+}
+.bb-verification-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+}
+.bb-verification-head .bb-verification-cmd {
+  color: var(--bb-muted);
+  font-family: var(--bb-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bb-verification-panel.ok .bb-verification-status {
+  color: var(--bb-success);
+  font-weight: 700;
+}
+.bb-verification-panel.fail .bb-verification-status {
+  color: var(--bb-danger);
+  font-weight: 700;
+}
+.bb-verification-detail {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--bb-radius-sm);
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* AI notes (paste AI result) panel */
+.bb-ai-notes-panel {
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
+  background: var(--bb-card);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bb-ai-notes-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--bb-muted);
+}
+.bb-ai-notes-textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  border: 1px solid var(--bb-border);
+  border-radius: var(--bb-radius-sm);
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.88);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  outline: none;
+}
+.bb-ai-notes-textarea:focus {
+  border-color: var(--bb-accent);
+}
+
 .bb-task-detail-main .bb-section {
   gap: 12px;
 }
@@ -1678,12 +1811,10 @@ select.bb-input {
   padding: 15px 2px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
-  transform-origin: center;
-  transition: background var(--bb-transition), transform var(--bb-transition);
+  transition: background var(--bb-transition);
 }
 .bb-task-property-row:hover {
   background: rgba(255, 255, 255, 0.018);
-  transform: scale(1.006);
 }
 .bb-task-property-row.muted {
   color: rgba(255, 255, 255, 0.45);

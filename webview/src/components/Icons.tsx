@@ -98,6 +98,14 @@ export function FileIcon({ size = 12, style }: IconProps) {
   );
 }
 
+export function FolderIcon({ size = 12, style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" style={style} aria-hidden="true">
+      <path d="M1.5 3.5A1 1 0 012.5 2.5h3.06a1 1 0 01.7.3l1.2 1.2H13.5a1 1 0 011 1V13a1 1 0 01-1 1h-11a1 1 0 01-1-1V3.5zm1.5.5v8h10V6.4H7.06a1 1 0 01-.7-.29l-1.2-1.2H3v.09z" />
+    </svg>
+  );
+}
+
 export function CalendarIcon({ size = 12, style }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" style={style} aria-hidden="true">

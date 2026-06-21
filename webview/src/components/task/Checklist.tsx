@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChecklistItem } from "../../types";
+import { ChecklistItem, FileMentionEntry } from "../../types";
 import { t } from "../../i18n";
 import { FileMentionInput } from "./FileMentionInput";
 import { renderTextWithFileMentions } from "../../fileMentionDisplay";
@@ -11,7 +11,7 @@ interface Props {
   titleLabel?: string;
   readOnly?: boolean;
   readOnlyMessage?: string;
-  fileSuggestions?: string[];
+  fileSuggestions?: FileMentionEntry[];
   onSearchFiles?: (query: string) => void;
   onOpenFile?: (path: string) => void;
 }

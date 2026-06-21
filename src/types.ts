@@ -24,6 +24,31 @@ export const TASK_TYPES: TaskType[] = ["feature", "bugfix", "hotfix", "chore", "
  */
 export type GitStage = "none" | "feature" | "review" | "staging" | "production";
 
+/**
+ * Live, Git-truth location of a task's branch — independent of which column
+ * the task sits in. This answers "where does the code physically live right
+ * now", not "what does the workflow intend":
+ *  - local:  branch exists only on this machine, nobody else can see it.
+ *  - origin: pushed to the remote — visible to the whole team, not yet
+ *            integrated anywhere.
+ *  - dev:    merged/ancestor of the dev/integration branch.
+ *  - prod:   merged/ancestor of the main/production branch.
+ * Computed on demand by GitService.getBranchLocationState(); never persisted,
+ * so it can never go stale or lie.
+ */
+export type BranchLocationState = "local" | "origin" | "dev" | "prod";
+
+/**
+ * One entry returned by GitService.searchFileMentions() for the "@" file
+ * mention picker (title / description / checklist / comments). `path` is
+ * always repo-relative with forward slashes; directories never have a
+ * trailing slash baked in — the UI adds it when drilling in.
+ */
+export interface FileMentionEntry {
+  path: string;
+  type: "file" | "dir";
+}
+
 /** When a column hook fires relative to a task move. */
 export type ColumnHookTrigger = "onEnter" | "onLeave";
 
@@ -710,6 +735,8 @@ export type InboundMessageType =
   | "finishTask"
   | "mergeToMain"
   | "getGitInfo"
+  | "getTaskBranchState"
+  | "runTaskVerification"
   | "changeUser"
   | "syncUsers"
   | "selectSshKey"
@@ -768,6 +795,8 @@ export type OutboundMessageType =
   | "branchMapGraph"
   | "commitDetail"
   | "columnHookResult"
+  | "taskBranchState"
+  | "taskVerificationResult"
   | "navigate"
   | "operationResult"
   | "error"
@@ -786,4 +815,34 @@ export interface OperationResult {
   action: string;
   message: string;
   detail?: string;
+}
+
+/**
+ * Live branch-location payload for a single task, sent in response to
+ * "getTaskBranchState". Drives the badge row above the task title — see
+ * BranchLocationState for what each state means.
+ */
+export interface TaskBranchStatePayload {
+  taskId: string;
+  branchName: string;
+  state: BranchLocationState;
+  existsLocal: boolean;
+  existsRemote: boolean;
+  ahead: number;
+  behind: number;
+}
+
+/**
+ * Result of running the configured "rules check" command for a task whose
+ * branch is on origin (see GitService.runCommand). `command` is empty when
+ * branchBoard.runCommandBeforeFinish isn't configured — the webview shows a
+ * "set it up" hint instead of a pass/fail in that case.
+ */
+export interface TaskVerificationResultPayload {
+  taskId: string;
+  ok: boolean;
+  command: string;
+  message: string;
+  detail: string;
+  ranAt: string;
 }

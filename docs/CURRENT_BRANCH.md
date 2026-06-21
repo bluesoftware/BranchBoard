@@ -53,3 +53,18 @@ nothing is executed for you.
 No destructive operations run automatically. Reset --hard, force push, delete
 branch, rebase, merge to main and production deploy all require their own
 confirmed flows.
+
+## Task flow stage vs. branch location — two different things
+
+This view's **task flow** pipeline (and the `GitStage` shown on the board:
+`none → feature → review → staging → production`) is a *workflow-intent*
+signal — it reflects which column the task sits in, set by moving the card.
+
+The **branch location badge** in the task drawer (`local / origin / dev /
+prod`, see [AI_WORKFLOW.md](./AI_WORKFLOW.md#branch-location-badges-local--origin--dev--prod))
+is a *Git-truth* signal — it's recomputed live from the branch itself and
+can never be out of sync with reality, because nothing sets it directly.
+
+In practice they usually agree (a task in "Do testu" with a branch merged
+into `dev` will show both), but the badge is the one to trust if they ever
+diverge — e.g. someone merged or pushed outside of BranchBoard.
