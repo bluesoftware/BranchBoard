@@ -21,12 +21,15 @@ export default defineConfig({
             if (id.includes("@tiptap") || id.includes("prosemirror")) {
               return "vendor-editor";
             }
-            if (id.includes("react") || id.includes("react-dom")) {
-              return "vendor-react";
-            }
             if (id.includes("dompurify")) {
               return "vendor-sanitize";
             }
+            // React, react-dom and every other vendor package (including
+            // internal React runtime deps like "scheduler") are kept in one
+            // chunk. Splitting React from packages it depends on internally
+            // can leave its module reference unresolved at chunk-init time,
+            // which surfaces in the webview as:
+            // "Cannot read properties of undefined (reading 'useState')".
             return "vendor";
           }
           if (id.includes("/webview/src/pages/")) {

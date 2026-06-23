@@ -22,7 +22,7 @@ export const TASK_TYPES: TaskType[] = ["feature", "bugfix", "hotfix", "chore", "
  *  - staging:    integrated into the dev/integration branch (e.g. origin/dev).
  *  - production: released into the production branch (e.g. origin/main).
  */
-export type GitStage = "none" | "feature" | "review" | "staging" | "production";
+export type GitStage = "none" | "ai-agent" | "feature" | "review" | "staging" | "production";
 
 /**
  * Live, Git-truth location of a task's branch — independent of which column
@@ -139,6 +139,146 @@ export interface ChecklistItem {
   done: boolean;
 }
 
+export type AIAgentStatus =
+  | "not_configured"
+  | "ready"
+  | "planning"
+  | "running"
+  | "reviewing"
+  | "finished"
+  | "failed"
+  | "cancelled";
+
+export type AIAgentRunStatus = "planning" | "running" | "reviewing" | "finished" | "failed" | "cancelled";
+
+export type AIAgentChangedFileStatus = "added" | "modified" | "deleted" | "renamed";
+
+export interface AIAgentChangedFile {
+  path: string;
+  status: AIAgentChangedFileStatus;
+}
+
+/** Token usage reported by an AI agent CLI, normalized across naming conventions. */
+export interface AIAgentUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
+
+/** Approximate cost computed from AIAgentUsage and an AIAgentDefinition's pricing. */
+export interface AIAgentCostEstimate {
+  currency: string;
+  inputCost: number;
+  outputCost: number;
+  cacheReadCost: number;
+  cacheWriteCost: number;
+  totalCost: number;
+}
+
+export interface AIAgentRunHistoryItem {
+  id: string;
+  agentId: string;
+  model?: string;
+  status: AIAgentRunStatus;
+  /** Which workflow step produced this turn — lets the UI render a proper chat timeline (plan/run/review messages) instead of one flat list. Optional only for backward-compat with history entries persisted before this field existed. */
+  kind?: "plan" | "run" | "review";
+  startedAt: string;
+  finishedAt?: string;
+  prompt: string;
+  plan?: string;
+  result?: string;
+  reviewResult?: string;
+  /** Files changed by this specific turn (only meaningful for kind === "run"). */
+  changedFiles?: AIAgentChangedFile[];
+  error?: string;
+  branch?: string;
+  usage?: AIAgentUsage;
+  cost?: AIAgentCostEstimate;
+}
+
+export interface TaskAIAgents {
+  enabled: boolean;
+  status: AIAgentStatus;
+  selectedAgentIds: string[];
+  /** IDs (file paths relative to .cursor/agents) of selected Cursor sub-agent personas. */
+  selectedCursorAgentIds?: string[];
+  selectedModel?: string;
+  prompt?: string;
+  plan?: string;
+  planFile?: string;
+  result?: string;
+  reviewResult?: string;
+  lastRunAt?: string;
+  lastFinishedAt?: string;
+  error?: string;
+  createdBranch?: string;
+  changedFiles?: AIAgentChangedFile[];
+  runHistory?: AIAgentRunHistoryItem[];
+  /** Token usage reported by the agent on its last completed run. */
+  lastUsage?: AIAgentUsage;
+  /** Approximate cost of the last completed run, computed from lastUsage and the agent's configured pricing. */
+  lastCost?: AIAgentCostEstimate;
+  /** Short, persisted memory used by the AI Cost Guard so later prompts can reuse a summary instead of full history. */
+  costMemory?: AiSessionMemory;
+  /** Last cost-guard decision computed for this task, shown in the UI and reused until the user asks again. */
+  lastCostDecision?: AiCostDecision;
+}
+
+/* ---------- AI Cost Guard / Local AI Optimizer ---------- */
+
+/** Overall cost posture chosen by the user; "auto" lets the rule engine decide everything. */
+export type AiCostMode = "auto" | "cheap" | "balanced" | "quality" | "manual";
+
+/** How much context is sent to Cursor CLI for a given step. */
+export type AiContextLevel = "small" | "normal" | "full";
+
+/** Estimated risk that a step will be expensive (tokens/model/context combined). */
+export type AiCostRisk = "low" | "medium" | "high";
+
+/** What the optimizer decided to do with the user's message. */
+export type AiDecisionAction = "answer_local" | "prepare_prompt" | "cursor_plan" | "cursor_work" | "cursor_review";
+
+/** Which kind of local model integration is configured for the optional advisory layer. */
+export type AiLocalOptimizerProvider = "local-command" | "openai-compatible-http";
+
+/**
+ * Decision produced by AiCostOptimizer for one chat message / task action.
+ * The local model (if enabled) is purely advisory — it MUST NOT execute code
+ * or Git, it only influences this decision, which is then validated and
+ * clamped against branchBoard.aiCli.* settings before anything runs.
+ */
+export interface AiCostDecision {
+  action: AiDecisionAction;
+  costRisk: AiCostRisk;
+  contextLevel: AiContextLevel;
+  modelPreference?: string;
+  selectedFiles: string[];
+  includeDiff: boolean;
+  includeFullFiles: boolean;
+  includeChatHistory: boolean;
+  includeChatSummary: boolean;
+  requiresUserConfirmation: boolean;
+  reason: string;
+  optimizedPrompt: string;
+}
+
+/**
+ * Short, persisted per-task memory so AiPromptOptimizer never needs to dump
+ * the full chat/run history into a new Cursor CLI prompt when a summary is
+ * already available.
+ */
+export interface AiSessionMemory {
+  lastPlanSummary?: string;
+  lastRunSummary?: string;
+  lastReviewSummary?: string;
+  /** Files touched in the most recently completed session, for change-aware context selection. */
+  lastFileList?: string[];
+  /** Rolling short summary of the chat/comments thread, refreshed instead of growing unbounded. */
+  lastChatSummary?: string;
+  updatedAt?: string;
+}
+
 export interface BoardTask {
   id: string;
   title: string;
@@ -166,6 +306,8 @@ export interface BoardTask {
   attachedFiles?: string[];
   /** AI-assist metadata (Command Center AI Review). Optional for old boards. */
   ai?: TaskAI;
+  /** Execution metadata for the AI Agent Task workflow. Optional for old boards. */
+  aiAgents?: TaskAIAgents;
 }
 
 /** Per-task AI-assist metadata used by the AI Review module. */
@@ -196,7 +338,16 @@ export type BoardEventType =
   | "dev_deploy_started"
   | "dev_deploy_finished"
   | "dev_deploy_failed"
-  | "branch_updated_from_main";
+  | "branch_updated_from_main"
+  | "ai_prompt_generated"
+  | "ai_agent_plan_started"
+  | "ai_agent_plan_finished"
+  | "ai_agent_run_started"
+  | "ai_agent_run_finished"
+  | "ai_agent_run_failed"
+  | "ai_review_started"
+  | "ai_review_finished"
+  | "ai_task_moved_to_local";
 
 /** A single audit-trail entry, stored on the board. */
 export interface BoardEvent {
@@ -320,6 +471,89 @@ export interface BranchInfo {
   hasConflicts: "true" | "false" | "unknown";
   deployedToDev: boolean;
   readyToMerge: boolean;
+}
+
+/**
+ * Optional, user-configured approximate pricing for an AI agent CLI, used to
+ * estimate the cost of a run from its reported token usage. All rates are
+ * "per million tokens". Left unset by default — BranchBoard never invents a
+ * price; if no rate is configured, the UI shows usage only and a hint to
+ * configure pricing instead of a possibly-wrong cost figure.
+ */
+export interface AIAgentPricing {
+  currency?: string;
+  inputPerMTok?: number;
+  outputPerMTok?: number;
+  cacheReadPerMTok?: number;
+  cacheWritePerMTok?: number;
+}
+
+/**
+ * Per-model override of AIAgentPricing, plus an "active" flag the user can
+ * toggle from the UI without deleting the model from `models`/CLI-discovered
+ * lists. When a model has its own entry here, it takes priority over the
+ * agent-level `pricing` in computeAIAgentCost — this is what makes it
+ * possible to keep one agent entry with several models (e.g. Sonnet/Opus/
+ * Haiku) while still pricing each one correctly.
+ */
+export interface AIAgentModelPricing {
+  /** Model id/slug, must match an entry in `models` (or a CLI-discovered model). */
+  modelId: string;
+  pricing?: AIAgentPricing;
+  /**
+   * Whether this model is offered to the user in the model picker. Defaults
+   * to true when unset, so existing configs keep working unchanged.
+   */
+  active?: boolean;
+}
+
+export interface AIAgentDefinition {
+  id: string;
+  name: string;
+  command: string;
+  args: string[];
+  enabled: boolean;
+  allowModels: boolean;
+  models?: string[];
+  /** Approximate per-million-token pricing, used to estimate run cost. Optional. */
+  pricing?: AIAgentPricing;
+  /** Optional per-model pricing/active overrides — see AIAgentModelPricing. */
+  modelPricing?: AIAgentModelPricing[];
+  /**
+   * Optional CLI args that print this agent's available models (e.g.
+   * `["models", "--output-format", "json"]` for cursor-agent's `agent
+   * models` subcommand). When unset, BranchBoard cannot fetch a live model
+   * list for this agent and the "refresh" action reports that plainly
+   * instead of guessing.
+   */
+  listModelsArgs?: string[];
+}
+
+/**
+ * A Cursor sub-agent persona discovered from a `.cursor/agents/*.md` file in
+ * the workspace. These are NOT CLI-runner agents (see AIAgentDefinition) —
+ * they are markdown persona/rule files that Cursor itself uses to route work
+ * to specialized personas. BranchBoard reads them so the user can attach one
+ * or more personas to a task; their content is folded into the generated AI
+ * prompt (see AIAgentService.buildPrompt).
+ */
+export interface CursorSubAgentInfo {
+  /** Stable id = file path relative to the workspace root, e.g. ".cursor/agents/javascript-core-senior.md". */
+  id: string;
+  /** Absolute file path on disk. */
+  filePath: string;
+  /** From YAML frontmatter `name:`. Falls back to the file name. */
+  name: string;
+  /** From YAML frontmatter `description:`. */
+  description: string;
+  /** Full markdown body (without the frontmatter block), used for content search and prompt injection. */
+  body: string;
+  /** File-glob triggers extracted from the body, e.g. ["*.js", "*.ts"]. */
+  fileTriggers: string[];
+  /** Free-text keyword triggers extracted from the body's "TRIGGERY"/triggers section. */
+  keywordTriggers: string[];
+  /** Last modification time (ISO string) of the source file. */
+  updatedAt: string;
 }
 
 /** One classified bucket count for the Overview dashboard. */
@@ -608,9 +842,112 @@ export interface BranchBoardConfig {
   /** Ask for confirmation before destructive move-driven Git actions (merge). */
   confirmGitActionsOnMove: boolean;
   appearance: AppearanceConfig;
+  titleBar: TitleBarConfig;
   notifications: NotificationSettings;
   adminAnnouncement: AdminAnnouncementConfig;
+  enableAIAgentColumn: boolean;
+  aiAgentColumnId: string;
+  aiAgents: AIAgentDefinition[];
+  requireConfirmationBeforeAIAgentRun: boolean;
+  requireCleanTreeBeforeAIAgentRun: boolean;
+  aiAgentTimeoutSeconds: number;
+  allowedAIAgentCommands: string[];
+  defaultAIBranchPrefix: string;
+  moveToLocalAfterAIAgentSuccess: boolean;
+  /**
+   * If true, every prompt sent to an AI Agent step (Plan/Praca AI/Review) is
+   * first passed through a fast/cheap "optimizer" model that rewrites it for
+   * the target agent before the real run — purely a prompt-shaping pass, it
+   * never executes code or touches files. Falls back to the original prompt
+   * if the optimizer fails, so it can never block a run.
+   */
+  optimizePromptsBeforeSend: boolean;
+  /** Which `aiAgents[].id` entry (CLI command/args) runs the optimization pass. Empty = use the same agent selected for the run. */
+  promptOptimizerAgentId: string;
+  /** Model id to request from the optimizer agent (must be in that agent's `models`). Empty = the agent's default. */
+  promptOptimizerModel: string;
+  /** Free-text instructions (PL/EN) given to the optimizer model describing how prompts should be technically adapted before sending. */
+  promptOptimizationRules: string;
+
+  /* ---------- AI Cost Guard / Local AI Optimizer ---------- */
+
+  /** Overall cost posture for Cursor CLI steps; "auto" = let the rule engine + optional local model decide. */
+  aiCostMode: AiCostMode;
+  /** Optional local-model advisory layer that helps AiCostOptimizer pick mode/context — never executes code or Git. */
+  aiLocalOptimizer: {
+    enabled: boolean;
+    provider: AiLocalOptimizerProvider;
+    /** Binary for the "local-command" provider; must also be in branchBoard.allowedAIAgentCommands-style allowlisting handled by AiLocalModelProvider. */
+    command: string;
+    args: string[];
+    /** Base URL for the "openai-compatible-http" provider. */
+    endpoint: string;
+    model: string;
+    timeoutSec: number;
+  };
+  /** Limits/defaults for how much context BranchBoard prepares before invoking Cursor CLI. */
+  aiCli: {
+    defaultContextLevel: AiContextLevel;
+    requireConfirmForFullContext: boolean;
+    maxFilesInContext: number;
+    maxPromptChars: number;
+    expensiveModelsRequireConfirm: boolean;
+  };
 }
+
+/** Built-in colour presets for the window title bar, matching popular themes. */
+export const TITLE_BAR_PRESETS = [
+  "custom",
+  "default",
+  "dracula",
+  "oneDarkPro",
+  "nightOwl",
+  "monokai",
+  "solarizedDark",
+] as const;
+export type TitleBarPreset = (typeof TITLE_BAR_PRESETS)[number];
+
+/**
+ * Window/Cursor title bar customization — the bar at the very top of the
+ * editor window that normally shows the folder name or the SSH remote.
+ * Implemented via two native VS Code mechanisms:
+ *  - colours: merged into `workbench.colorCustomizations` (titleBar.* keys).
+ *  - branch:  appended to `window.title` using the built-in
+ *             `${activeRepositoryBranchName}` variable, separated visually
+ *             with `branchSeparator`.
+ * Note: VS Code's title bar renders as a single string with one background —
+ * there is no API to give a substring (e.g. just the branch name) its own
+ * background colour. `branchSeparator` is the closest practical equivalent.
+ */
+export interface TitleBarConfig {
+  enabled: boolean;
+  preset: TitleBarPreset;
+  backgroundColor: string;
+  foregroundColor: string;
+  borderColor: string;
+  inactiveBackgroundColor: string;
+  inactiveForegroundColor: string;
+  showBranch: boolean;
+  branchSeparator: string;
+  /**
+   * "Branch button" — VS Code/Cursor give extensions no public API to add a
+   * custom-colored button inside the native title bar itself (that's the
+   * proprietary chrome where e.g. Cursor's own "Agents Window" pill lives).
+   * The closest legitimate equivalent is a clickable Status Bar item, which
+   * IS native VS Code chrome and DOES support a custom text color. Clicking
+   * it runs branchBoard.checkoutTaskBranch (the same branch switcher used
+   * elsewhere in the extension).
+   */
+  branchButtonEnabled: boolean;
+  branchButtonColor: string;
+  branchButtonBackground: BranchButtonBackground;
+}
+
+/** Status bar items only support a handful of theme-approved backgrounds
+ *  (VS Code does not allow arbitrary hex backgrounds here, by design, to
+ *  keep the status bar visually consistent across extensions). */
+export const BRANCH_BUTTON_BACKGROUNDS = ["none", "prominent", "warning", "error"] as const;
+export type BranchButtonBackground = (typeof BRANCH_BUTTON_BACKGROUNDS)[number];
 
 /** UI appearance toggles, mirrored to the webview. */
 export interface AppearanceConfig {
@@ -672,8 +1009,10 @@ export interface AppConfig {
     sqliteRemotePath: string;
   };
   appearance: AppearanceConfig;
+  titleBar: TitleBarConfig;
   notifications: NotificationSettings;
   adminAnnouncement: AdminAnnouncementConfig;
+  aiAgents: AIAgentDefinition[];
   /** webview-resolved URIs for the bundled notification sounds, keyed by id. */
   soundFiles: Record<string, string>;
   policy: {
@@ -710,6 +1049,29 @@ export interface AppConfig {
     runGitActionsOnMove: boolean;
     /** Whether move-driven Git actions ask for confirmation before running. */
     confirmGitActionsOnMove: boolean;
+    enableAIAgentColumn: boolean;
+    aiAgentColumnId: string;
+    requireConfirmationBeforeAIAgentRun: boolean;
+    requireCleanTreeBeforeAIAgentRun: boolean;
+    aiAgentTimeoutSeconds: number;
+    allowedAIAgentCommands: string[];
+    defaultAIBranchPrefix: string;
+    moveToLocalAfterAIAgentSuccess: boolean;
+    optimizePromptsBeforeSend: boolean;
+    promptOptimizerAgentId: string;
+    promptOptimizerModel: string;
+    promptOptimizationRules: string;
+    aiCostMode: AiCostMode;
+    /** Whether a local optimizer model is configured/enabled — the command/endpoint themselves stay host-side only. */
+    aiLocalOptimizerEnabled: boolean;
+    aiLocalOptimizerProvider: AiLocalOptimizerProvider;
+    aiCli: {
+      defaultContextLevel: AiContextLevel;
+      requireConfirmForFullContext: boolean;
+      maxFilesInContext: number;
+      maxPromptChars: number;
+      expensiveModelsRequireConfirm: boolean;
+    };
   };
 }
 
@@ -737,6 +1099,13 @@ export type InboundMessageType =
   | "getGitInfo"
   | "getTaskBranchState"
   | "runTaskVerification"
+  | "generateAIAgentPrompt"
+  | "runAIAgentPlan"
+  | "runAIAgent"
+  | "runAIAgentReview"
+  | "acceptAIAgentResult"
+  | "rejectAIAgentResult"
+  | "cancelAIAgent"
   | "changeUser"
   | "syncUsers"
   | "selectSshKey"
@@ -753,6 +1122,8 @@ export type InboundMessageType =
   | "openFile"
   | "openDiff"
   | "searchFiles"
+  | "getCursorAgents"
+  | "listAIAgentModels"
   | "getBranchMapGraph"
   | "getCommitDetail"
   | "openCommitDiff"
@@ -776,7 +1147,8 @@ export type InboundMessageType =
   | "markAllNotificationsRead"
   | "markTaskCommentsRead"
   | "markAnnouncementRead"
-  | "refresh";
+  | "refresh"
+  | "getAiCostDecision";
 
 export interface InboundMessage {
   type: InboundMessageType;
@@ -792,16 +1164,22 @@ export type OutboundMessageType =
   | "branchDetail"
   | "connectionStatus"
   | "fileList"
+  | "cursorAgents"
+  | "aiAgentModelsResult"
   | "branchMapGraph"
   | "commitDetail"
   | "columnHookResult"
   | "taskBranchState"
   | "taskVerificationResult"
+  | "aiAgentResult"
+  | "aiAgentLog"
+  | "aiAgentLifecycle"
   | "navigate"
   | "operationResult"
   | "error"
   | "toast"
-  | "notification";
+  | "notification"
+  | "aiCostDecision";
 
 export interface OutboundMessage {
   type: OutboundMessageType;
@@ -814,6 +1192,25 @@ export interface OperationResult {
   ok: boolean;
   action: string;
   message: string;
+  detail?: string;
+}
+
+/**
+ * Result of a "listAIAgentModels" request: either a freshly CLI-discovered
+ * model list for the agent, or a clear reason why none could be fetched
+ * (missing listModelsArgs, command not allowed/found, CLI exited non-zero,
+ * or output that couldn't be parsed into a model list). BranchBoard never
+ * guesses a model list any more than it guesses a price — `models` is only
+ * ever populated when the CLI actually reported something parseable.
+ */
+export interface AIAgentModelsResultPayload {
+  agentId: string;
+  ok: boolean;
+  /** Model ids/slugs parsed from the CLI's output, if any. */
+  models: string[];
+  /** Models already configured (in `models` or `modelPricing`) that have no usable pricing rate set. */
+  modelsMissingPrice: string[];
+  message?: string;
   detail?: string;
 }
 
@@ -833,6 +1230,35 @@ export interface TaskBranchStatePayload {
 }
 
 /**
+ * One live chunk of an AI agent's stdout/stderr, streamed to the webview as
+ * soon as it's produced by the child process (see AIAgentService.run +
+ * BoardPanel.runAIAgentWorkflow). The webview appends these into a
+ * Cursor-chat-like scrolling console for the task that's currently running
+ * an agent — they are NOT persisted to board.json, this is a transient,
+ * in-memory log only.
+ */
+export interface AIAgentLogPayload {
+  taskId: string;
+  kind: "plan" | "run" | "review";
+  stream: "stdout" | "stderr" | "system";
+  text: string;
+}
+
+/**
+ * Lifecycle event for one AI agent run, used by the webview to know exactly
+ * when to lock/unlock the run buttons and show/hide the live console — this
+ * is the authoritative "is an agent busy right now" signal, independent of
+ * the task's persisted aiAgents.status (which only updates once per run,
+ * not per chunk).
+ */
+export interface AIAgentLifecyclePayload {
+  taskId: string;
+  kind: "plan" | "run" | "review";
+  phase: "started" | "finished" | "failed" | "cancelled";
+  message?: string;
+}
+
+/**
  * Result of running the configured "rules check" command for a task whose
  * branch is on origin (see GitService.runCommand). `command` is empty when
  * branchBoard.runCommandBeforeFinish isn't configured — the webview shows a
@@ -845,4 +1271,30 @@ export interface TaskVerificationResultPayload {
   message: string;
   detail: string;
   ranAt: string;
+}
+
+/**
+ * Request for "getAiCostDecision": the webview sends the chat message the
+ * user is about to send for a task, plus (optionally) a manual override of
+ * the chosen action — used by the "Tylko przygotuj prompt" / "Uruchom Cursor
+ * CLI" buttons once the user has already seen and accepted a decision.
+ */
+export interface AiCostDecisionRequestPayload {
+  taskId: string;
+  userMessage: string;
+  /** Manual override (e.g. user clicked "Run Cursor CLI" directly) — skips re-asking the local model for the action. */
+  forceAction?: AiDecisionAction;
+  /** User asked to shrink the context after seeing a "full" decision. */
+  forceContextLevel?: AiContextLevel;
+  /** Confirms a previously returned decision that required confirmation (full context / high risk / expensive model). */
+  confirmed?: boolean;
+}
+
+/** Response payload for "getAiCostDecision", sent back as the "aiCostDecision" outbound message. */
+export interface AiCostDecisionPayload extends AiCostDecision {
+  taskId: string;
+  /** Whether AiLocalModelProvider was actually consulted (false = pure rules engine, or the local model failed/was disabled). */
+  usedLocalModel: boolean;
+  /** Set when the local model was configured but failed/timed out/returned invalid output — the rules-only decision was used instead. */
+  localModelError?: string;
 }

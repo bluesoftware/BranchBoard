@@ -1,110 +1,343 @@
 # AI Coding Workflow
 
-BranchBoard is positioned for the way modern teams actually build: **human + AI +
-Git branch**. The differentiator is the **Copy AI Prompt** button on every task.
+BranchBoard is built for the modern workflow: human developer, task, branch and
+AI agent working in the same repository.
 
-## What it does
+The goal is not to let AI silently change production. The goal is to make AI
+work visible, reviewable and attached to the same card and branch as the human
+work.
 
-Click **Copy AI Prompt** in the task drawer. BranchBoard builds a complete,
-ready-to-paste prompt for Cursor, Claude or GitHub Copilot Chat and copies it to
-your clipboard.
+## AI Layers
 
-The prompt includes:
+BranchBoard has two AI layers:
 
-- the branch you're working on
-- project name
-- task title and description
-- acceptance criteria (derived from unchecked checklist items)
-- the full checklist
-- a summary of comments
-- your configured test/build command
-- a fixed set of rules
+1. **Copy AI Prompt** - prepares a complete prompt for Cursor, Claude or Copilot
+   Chat and copies it to the clipboard.
+2. **AI Agent workflow** - runs configured local CLI agents from a task with
+   Plan, Work and Review steps.
 
-## The rules
+## Copy AI Prompt
 
-The built-in template instructs the agent to:
+The prompt is built from task and project context:
 
-- inspect the existing code relevant to the task first
-- make a short implementation plan before writing code
-- change only the files required for the task — no unrelated refactors
-- keep the solution simple and production-ready
-- keep commits focused and small
-- run the test/build command if available
-- finish by summarizing changed files and how to test them
+- project name,
+- task title,
+- description,
+- acceptance criteria,
+- attached files,
+- checklist,
+- comments,
+- branch name,
+- configured test/build command,
+- fixed rules for safe repo work.
 
-## Example output
+The template is configured through `branchBoard.aiPromptTemplate`.
 
+Supported variables:
+
+- `{title}`
+- `{description}`
+- `{branch}`
+- `{project}`
+- `{acceptance}`
+- `{files}`
+- `{checklist}`
+- `{comments}`
+- `{command}`
+
+Use this mode when you want the user to manually paste a prompt into an AI chat.
+
+## AI Agent Workflow
+
+The task drawer and Current Branch view can run a configured agent.
+
+Recommended flow:
+
+1. **Generate prompt**
+   Build the task prompt from board, Git and attached file context.
+
+2. **Plan**
+   Ask the agent to produce only a plan. BranchBoard writes a plan file under
+   `.cursor/plans` when possible.
+
+3. **Work**
+   BranchBoard ensures/creates the task branch, then runs the agent against the
+   approved prompt/plan.
+
+4. **Review**
+   Ask the agent to review the work against the task, checklist and changed
+   files. This step does not modify files.
+
+5. **Accept or reject**
+   Store the result on the task, then continue with normal human review and Git
+   flow.
+
+## Agent Execution Safety
+
+AI agents are local CLI programs configured in `branchBoard.aiAgents`.
+
+Execution rules:
+
+- run via `spawn`, not a shell,
+- command must be allowed by `branchBoard.allowedAIAgentCommands`,
+- optional clean working tree gate through
+  `branchBoard.requireCleanTreeBeforeAIAgentRun`,
+- optional confirmation through `branchBoard.requireConfirmationBeforeAIAgentRun`,
+- timeout through `branchBoard.aiAgentTimeoutSeconds`,
+- no push, merge, deploy or branch deletion is performed by the AI service,
+- user can stop/cancel the active process.
+
+BranchBoard records output, status and changed files, but the developer remains
+responsible for final code.
+
+## Default Agents
+
+The manifest ships with:
+
+- `cursor-agent` - enabled by default,
+- `claude-cli` - configured but disabled by default.
+
+An agent definition can include:
+
+- `id`
+- `name`
+- `command`
+- `args`
+- `enabled`
+- `allowModels`
+- `models`
+- `pricing`
+- `modelPricing`
+- `listModelsArgs`
+
+Example shape:
+
+```jsonc
+{
+  "id": "cursor-agent",
+  "name": "Cursor Agent",
+  "command": "cursor-agent",
+  "args": ["-p", "{{prompt}}", "--output-format", "json"],
+  "enabled": true,
+  "allowModels": true,
+  "models": ["auto", "sonnet", "opus", "gpt-5", "gpt-5-codex"],
+  "listModelsArgs": ["models", "--output-format", "json"]
+}
 ```
-You are working in this repository on branch: feature/task-ab12cd-add-login.
 
-Project: BranchBoard
+Argument placeholders:
 
-Task:
-Add login form
+- `{{prompt}}`
+- `{{promptFile}}`
+- `{{model}}`
+- `{{branch}}`
+- `{{taskId}}`
+- `{{taskTitle}}`
+- `{{kind}}`
 
-Description:
-Email + password form with validation.
+## Prompt And Plan Files
 
-Acceptance criteria:
-- Validate email format
-- Show inline errors
+BranchBoard writes prompt files to:
+
+```text
+.branchboard/ai/
+```
+
+Plan files are written to:
+
+```text
+.cursor/plans/
+```
+
+These files make AI work inspectable outside the WebView and easier to reuse in
+Cursor workflows.
+
+## Live Console
+
+AI agent output is streamed to the WebView as:
+
+- stdout,
+- stderr,
+- system/result messages.
+
+`json`, `stream-json` and plain text output are handled differently:
+
+- buffered JSON is parsed at process close,
+- stream JSON can show readable assistant/system chunks during execution,
+- plain text is forwarded directly.
+
+The raw process result is stored in the task's AI run history.
+
+## Cursor Sub-Agents
+
+BranchBoard reads Cursor persona files from:
+
+```text
+.cursor/agents/*.md
+```
+
+It extracts:
+
+- name,
+- description,
+- markdown body,
+- file triggers,
+- keyword triggers,
+- update timestamp.
+
+Selected personas are inserted into the generated AI prompt. They are not runner
+commands; they are context/persona documents for Cursor.
+
+## Branches Created By AI
+
+If a task has no branch, AI Work can suggest/create one using:
+
+```text
+branchBoard.defaultAIBranchPrefix
+```
+
+Default:
+
+```text
+ai/
+```
+
+When the AI work step succeeds, `branchBoard.moveToLocalAfterAIAgentSuccess`
+can move the task into the normal local/in-progress column.
+
+## Model Discovery
+
+If an agent has `listModelsArgs`, BranchBoard can ask the CLI for available
+models.
+
+BranchBoard never invents model lists:
+
+- missing `listModelsArgs` returns a clear message,
+- blocked/missing command returns a clear message,
+- non-zero CLI exit returns a clear message,
+- unparseable output returns a clear message.
+
+Parsed models can be combined with configured pricing.
+
+## Usage And Cost
+
+Agents may report token usage. BranchBoard normalizes common field names:
+
+- `inputTokens` / `input_tokens`
+- `outputTokens` / `output_tokens`
+- `cacheReadTokens` / `cache_read_input_tokens`
+- `cacheWriteTokens` / `cache_creation_input_tokens`
+
+Cost estimates require both:
+
+1. usage reported by the agent,
+2. pricing configured on the agent or model.
+
+If either is missing, BranchBoard shows usage/cost as unavailable rather than
+guessing.
+
+## AI Cost Guard
+
+AI Cost Guard decides how much context to send and whether a run needs user
+confirmation.
+
+Decision actions:
+
+- `answer_local`
+- `prepare_prompt`
+- `cursor_plan`
+- `cursor_work`
+- `cursor_review`
+
+Context levels:
+
+- `small`
+- `normal`
+- `full`
+
+Risk levels:
+
+- `low`
+- `medium`
+- `high`
+
+Important settings:
+
+- `branchBoard.aiCostMode`
+- `branchBoard.aiCli.defaultContextLevel`
+- `branchBoard.aiCli.requireConfirmForFullContext`
+- `branchBoard.aiCli.maxFilesInContext`
+- `branchBoard.aiCli.maxPromptChars`
+- `branchBoard.aiCli.expensiveModelsRequireConfirm`
+
+AI Cost Guard can use a local optimizer model, but that model is advisory only.
+It cannot execute Git, commands or agent work.
+
+## Prompt Optimizer
+
+When `branchBoard.optimizePromptsBeforeSend` is enabled, BranchBoard runs a
+text-only optimization pass before the real Plan/Work/Review agent.
 
 Rules:
-- First inspect the existing code relevant to this task.
-- Make a short implementation plan before writing code.
-- Change only files required for this task. Do not refactor unrelated code.
-- ...
-- Run the test/build command if available: npm run build
-- At the end, summarize the changed files and how to test them.
+
+- it rewrites the prompt for clarity/structure,
+- it must preserve facts, files and constraints,
+- it never executes task work,
+- it never edits files,
+- if it fails, the original prompt is used.
+
+Settings:
+
+- `promptOptimizerAgentId`
+- `promptOptimizerModel`
+- `promptOptimizationRules`
+
+## Branch Location Badges
+
+Every task with a branch can show live location:
+
+- `local` - branch exists only on this machine,
+- `origin` - branch was pushed and is visible to the team,
+- `dev` - branch is merged into the configured dev/staging branch,
+- `prod` - branch is merged into main/production.
+
+This state is computed from Git on demand and not persisted.
+
+Once a branch reaches `origin`, additional actions can appear:
+
+- check rules compliance,
+- summarize changes,
+- paste AI result.
+
+## Recommended Team Policy
+
+For production teams:
+
+```jsonc
+{
+  "branchBoard.requireConfirmationBeforeAIAgentRun": true,
+  "branchBoard.requireCleanTreeBeforeAIAgentRun": true,
+  "branchBoard.aiAgentTimeoutSeconds": 900,
+  "branchBoard.aiCostMode": "auto",
+  "branchBoard.aiCli.defaultContextLevel": "normal",
+  "branchBoard.aiCli.requireConfirmForFullContext": true,
+  "branchBoard.aiCli.expensiveModelsRequireConfirm": true
+}
 ```
 
-## Customizing the template
+For expensive models, configure per-model pricing and keep review required.
 
-Edit `branchBoard.aiPromptTemplate` (or Settings → AI). Available variables:
-`{title}`, `{description}`, `{branch}`, `{project}`, `{acceptance}`, `{checklist}`,
-`{comments}`, `{command}`. Leave it empty to use the built-in template.
+## What AI Must Not Do
 
-## Branch location badges (local / origin / dev / prod)
+Through BranchBoard's AI layer, AI must not:
 
-Every task with a branch shows a live **location badge** above the title in the
-task drawer. It is never stored — it's computed on demand straight from Git:
+- merge to main,
+- push branches,
+- deploy,
+- delete branches,
+- mark tasks done,
+- bypass dirty-tree checks,
+- bypass allowed command lists,
+- silently change unrelated files.
 
-- **local** — the branch only exists on your machine, nobody else can see it.
-- **origin** — the branch has been pushed and is visible to the whole team.
-- **dev** — the branch has been merged into the configured dev/staging branch.
-- **prod** — the branch has been merged into the main branch.
-
-The state is recomputed via `git merge-base --is-ancestor` against main (and,
-if `branchBoard.useDevBranch` is on, against the dev branch) plus the existing
-ahead/behind/exists checks. This is intentionally never persisted on the task —
-persisting it would let the badge lie if someone merges or pushes outside of
-BranchBoard.
-
-### Action badges that appear once a branch reaches "origin"
-
-As soon as a branch is pushed (state = `origin`), three extra clickable
-badges appear next to the location badge:
-
-- **Sprawdź zgodność z rules / Check rules compliance** — runs your configured
-  `branchBoard.runCommandBeforeFinish` command (the same trusted,
-  admin-configured command used by the Finish Task flow, executed the same
-  safe way: `execFile`, no shell, no task-controlled input) and shows
-  pass/fail plus full stdout/stderr right inside the task, so a reviewer never
-  has to open a terminal.
-- **Podsumuj zmiany / Summarize changes** — copies a ready-to-paste AI prompt
-  built from the branch's changed files, recent commits, the task title, and
-  the same fixed rules block used by "Copy AI Prompt". Paste it into
-  Cursor/Claude/Copilot Chat to get a structured changes summary.
-- **Wklej wynik AI / Paste AI result** — opens a textarea (backed by the
-  existing `task.ai.aiNotes` field) where you paste whatever the AI produced
-  — a rules check, a changes summary, anything — so the reviewer sees it
-  without leaving the task.
-
-If the local branch hasn't been pushed yet (state = `local`), a single
-**Push** badge appears instead, since the AI actions only make sense once the
-code is visible to the team.
-
-This is the localhost → dev → prod path BranchBoard is built around: the
-badge row tells you and your reviewer exactly where a piece of work currently
-lives, and the action badges give you the verification you need before
-deciding to move it further — all without leaving the task.
+Those actions stay in human-controlled Git and board workflows.

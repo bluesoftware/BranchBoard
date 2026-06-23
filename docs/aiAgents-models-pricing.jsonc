@@ -1,0 +1,157 @@
+// Przykładowa konfiguracja branchBoard.aiAgents — WERSJA 2, po dodaniu
+// per-model pricing/active (AIAgentModelPricing) i przycisku "Odśwież listę
+// modeli z CLI" w Ustawienia → AI.
+//
+// CO SIĘ ZMIENIŁO względem starej wersji (jeden wpis agenta = jeden model):
+// Teraz cennik i flaga "aktywny" mogą być ustawione PER MODEL w jednym
+// wpisie agenta (pole "modelPricing"), więc nie trzeba już duplikować
+// całego agenta dla każdego modelu — wystarczy JEDEN wpis "cursor-agent"
+// z "allowModels": true, listą "models" i tablicą "modelPricing".
+//
+// JAK UŻYĆ:
+// 1. Skopiuj tablicę poniżej do swojego settings.json (klucz "branchBoard.aiAgents").
+// 2. Otwórz BranchBoard → Ustawienia → zakładka "AI" → sekcja
+//    "Modele agentów AI i cennik" → kliknij "Odśwież listę modeli z CLI"
+//    przy wpisie cursor-agent. To naprawi wszystkie niepewne nazwy modeli
+//    (oznaczone niżej "// ZWERYFIKUJ") realną listą z Twojej wersji CLI —
+//    BranchBoard nigdy nie zgaduje nazw modeli, tylko pyta CLI.
+// 3. W tej samej sekcji ustaw "Aktywny" tylko dla modeli, które faktycznie
+//    chcesz mieć w dropdownie "Wybierz model" w drawerze zadania, i wpisz/
+//    poprawiaj ceny per model — zapisuje się od razu, bez edycji JSON.
+// 4. "cacheWritePerMTok" jest pominięty tam, gdzie dany dostawca nie ma
+//    osobnej opłaty za zapis do cache — brak pola = ten składnik kosztu
+//    po prostu nie jest liczony (BranchBoard nigdy nie zgaduje ceny).
+
+"branchBoard.aiAgents": [
+  {
+    "id": "cursor-agent",
+    "name": "Cursor Agent",
+    "command": "cursor-agent",
+    // {{model}} jest podstawiane z wybranego modelu — dzięki temu jeden
+    // wpis agenta obsługuje wszystkie modele z listy "models" poniżej.
+    "args": ["--trust", "-p", "{{prompt}}", "--output-format", "stream-json", "--model", "{{model}}"],
+    "enabled": true,
+    "allowModels": true,
+    // Komenda, którą uruchamia przycisk "Odśwież listę modeli z CLI" —
+    // zastąpi poniższą listę realnymi slugami z Twojej wersji cursor-agent.
+    "listModelsArgs": ["models", "--output-format", "json"],
+    "models": [
+      "sonnet-4", "sonnet-4-1m", "haiku-4.5", "opus-4.5", "sonnet-4.5",
+      "opus-4.6", "opus-4.6-fast", "sonnet-4.6", "opus-4.7", "fable-5",
+      "opus-4.7-fast", "opus-4.8",
+      "composer-1", "composer-1.5", "composer-2", "composer-2.5",
+      "gemini-2.5-flash", "gemini-3-flash", "gemini-3-pro",
+      "gemini-3-pro-image-preview", "gemini-3.1-pro", "gemini-3.5-flash",
+      "gpt-5", "gpt-5-fast", "gpt-5-mini", "gpt-5-codex", "gpt-5.1-codex",
+      "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5.2", "gpt-5.2-codex",
+      "gpt-5.3-codex", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.5",
+      "grok-4.20", "grok-4.3", "grok-build-0.1",
+      "kimi-k2.5"
+    ],
+    // Per-model cennik + "active". Tylko "sonnet-4" i "gpt-5" mają
+    // potwierdzony przez dokumentację Cursor identyfikator --model, więc
+    // tylko one są "active": true od razu. Resztę włącz po weryfikacji
+    // (Refresh z CLI albo `cursor-agent` → `/model`).
+    "modelPricing": [
+      { "modelId": "sonnet-4", "active": true,
+        "pricing": { "currency": "USD", "inputPerMTok": 3, "cacheWritePerMTok": 3.75, "cacheReadPerMTok": 0.3, "outputPerMTok": 15 } },
+      { "modelId": "gpt-5", "active": true,
+        "pricing": { "currency": "USD", "inputPerMTok": 1.25, "cacheReadPerMTok": 0.125, "outputPerMTok": 10 } },
+
+      { "modelId": "sonnet-4-1m", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 6, "cacheWritePerMTok": 7.5, "cacheReadPerMTok": 0.6, "outputPerMTok": 22.5 } },
+      { "modelId": "haiku-4.5", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1, "cacheWritePerMTok": 1.25, "cacheReadPerMTok": 0.1, "outputPerMTok": 5 } },
+      { "modelId": "opus-4.5", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 5, "cacheWritePerMTok": 6.25, "cacheReadPerMTok": 0.5, "outputPerMTok": 25 } },
+      { "modelId": "sonnet-4.5", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 3, "cacheWritePerMTok": 3.75, "cacheReadPerMTok": 0.3, "outputPerMTok": 15 } },
+      { "modelId": "opus-4.6", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 5, "cacheWritePerMTok": 6.25, "cacheReadPerMTok": 0.5, "outputPerMTok": 25 } },
+      { "modelId": "opus-4.6-fast", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 30, "cacheWritePerMTok": 37.5, "cacheReadPerMTok": 3, "outputPerMTok": 150 } },
+      { "modelId": "sonnet-4.6", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 3, "cacheWritePerMTok": 3.75, "cacheReadPerMTok": 0.3, "outputPerMTok": 15 } },
+      { "modelId": "opus-4.7", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 5, "cacheWritePerMTok": 6.25, "cacheReadPerMTok": 0.5, "outputPerMTok": 25 } },
+      { "modelId": "fable-5", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 10, "cacheWritePerMTok": 12.5, "cacheReadPerMTok": 1, "outputPerMTok": 50 } },
+      { "modelId": "opus-4.7-fast", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 30, "cacheWritePerMTok": 37.5, "cacheReadPerMTok": 3, "outputPerMTok": 150 } },
+      { "modelId": "opus-4.8", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 5, "cacheWritePerMTok": 6.25, "cacheReadPerMTok": 0.5, "outputPerMTok": 25 } },
+
+      { "modelId": "composer-1", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.25, "cacheReadPerMTok": 0.125, "outputPerMTok": 10 } },
+      { "modelId": "composer-1.5", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 3.5, "cacheReadPerMTok": 0.35, "outputPerMTok": 17.5 } },
+      { "modelId": "composer-2", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.5, "cacheReadPerMTok": 0.2, "outputPerMTok": 2.5 } },
+      { "modelId": "composer-2.5", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.5, "cacheReadPerMTok": 0.2, "outputPerMTok": 2.5 } },
+
+      { "modelId": "gemini-2.5-flash", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.3, "cacheReadPerMTok": 0.03, "outputPerMTok": 2.5 } },
+      { "modelId": "gemini-3-flash", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.5, "cacheReadPerMTok": 0.05, "outputPerMTok": 3 } },
+      { "modelId": "gemini-3-pro", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 2, "cacheReadPerMTok": 0.2, "outputPerMTok": 12 } },
+      { "modelId": "gemini-3-pro-image-preview", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 2, "cacheReadPerMTok": 0.2, "outputPerMTok": 12 } },
+      { "modelId": "gemini-3.1-pro", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 2, "cacheReadPerMTok": 0.2, "outputPerMTok": 12 } },
+      { "modelId": "gemini-3.5-flash", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.5, "cacheReadPerMTok": 0.15, "outputPerMTok": 9 } },
+
+      { "modelId": "gpt-5-fast", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 2.5, "cacheReadPerMTok": 0.25, "outputPerMTok": 20 } },
+      { "modelId": "gpt-5-mini", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.25, "cacheReadPerMTok": 0.025, "outputPerMTok": 2 } },
+      { "modelId": "gpt-5-codex", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.25, "cacheReadPerMTok": 0.125, "outputPerMTok": 10 } },
+      { "modelId": "gpt-5.1-codex", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.25, "cacheReadPerMTok": 0.125, "outputPerMTok": 10 } },
+      { "modelId": "gpt-5.1-codex-max", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.25, "cacheReadPerMTok": 0.125, "outputPerMTok": 10 } },
+      { "modelId": "gpt-5.1-codex-mini", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.25, "cacheReadPerMTok": 0.025, "outputPerMTok": 2 } },
+      { "modelId": "gpt-5.2", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.75, "cacheReadPerMTok": 0.175, "outputPerMTok": 14 } },
+      { "modelId": "gpt-5.2-codex", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.75, "cacheReadPerMTok": 0.175, "outputPerMTok": 14 } },
+      { "modelId": "gpt-5.3-codex", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.75, "cacheReadPerMTok": 0.175, "outputPerMTok": 14 } },
+      { "modelId": "gpt-5.4", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 2.5, "cacheReadPerMTok": 0.25, "outputPerMTok": 15 } },
+      { "modelId": "gpt-5.4-mini", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.75, "cacheReadPerMTok": 0.075, "outputPerMTok": 4.5 } },
+      { "modelId": "gpt-5.4-nano", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.2, "cacheReadPerMTok": 0.02, "outputPerMTok": 1.25 } },
+      { "modelId": "gpt-5.5", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 5, "cacheReadPerMTok": 0.5, "outputPerMTok": 30 } },
+
+      { "modelId": "grok-4.20", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 2, "cacheReadPerMTok": 0.2, "outputPerMTok": 6 } },
+      { "modelId": "grok-4.3", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1.25, "cacheReadPerMTok": 0.2, "outputPerMTok": 2.5 } },
+      { "modelId": "grok-build-0.1", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 1, "cacheReadPerMTok": 0.2, "outputPerMTok": 2 } },
+
+      { "modelId": "kimi-k2.5", "active": false, // ZWERYFIKUJ
+        "pricing": { "currency": "USD", "inputPerMTok": 0.6, "cacheReadPerMTok": 0.1, "outputPerMTok": 3 } }
+    ]
+  },
+
+  // Claude CLI nie ma komendy listującej modele nieinteraktywnie, więc nie
+  // ma sensu "listModelsArgs" — zostaw tę listę ręcznie skonfigurowaną.
+  {
+    "id": "claude-cli",
+    "name": "Claude CLI",
+    "command": "claude",
+    "args": ["{{prompt}}"],
+    "enabled": false,
+    "allowModels": true,
+    "models": ["auto", "sonnet", "opus"],
+    "pricing": { "currency": "USD", "inputPerMTok": 3, "outputPerMTok": 15, "cacheReadPerMTok": 0.3 }
+  }
+]

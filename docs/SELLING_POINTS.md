@@ -1,56 +1,117 @@
 # Selling Points
 
-**Promise:** Manage tasks where code happens. One task. One branch. One workflow.
+## Promise
 
-## The one-liner
+**Manage work where code happens. One task. One branch. One workflow.**
 
-BranchBoard connects the task board with the actual Git branch, so your team
-always knows who works on what, where the code is, and what is ready to review —
-without leaving VS Code or Cursor.
+BranchBoard connects a Kanban task with the actual Git branch, then adds the
+operational views a small development team needs: current branch context,
+Command Center, Branch Map, AI Agent workflow, deployment records, notifications
+and Git safety.
 
-## Why teams choose it
+## One-Liner
 
-- **Task = branch.** Every card is tied to a real Git branch. No more guessing
-  which branch belongs to which ticket.
-- **Always know where code actually is.** A live `local → origin → dev → prod`
-  badge on every task, computed from Git itself — never a stale status field
-  someone forgot to update.
-- **Review without leaving the task.** Once a branch is pushed, one click runs
-  your rules/build/test command and shows the result inline; another copies an
-  AI prompt to summarize the diff; a third lets you paste the AI's verdict onto
-  the card. The reviewer sees everything — no terminal, no PR tab, no Slack
-  thread.
-- **Lives in the editor.** No browser tab, no context switch. Native dark UI that
-  matches Cursor / VS Code themes automatically.
-- **AI-native.** One-click prompts for Cursor, Claude and Copilot turn a task into
-  a precise, rule-bound instruction set — and the badges above turn the AI's
-  output into something the whole team can actually review.
-- **Safe by default.** Never merges to `main` or deletes branches without explicit
-  confirmation; never closes a task when Git fails.
-- **Lightweight.** Not a Jira replacement — fast, elegant, focused. Ideal for
-  2–10 person teams, freelancers and software houses.
-- **Local-first.** Works offline from a single JSON file, backed up automatically.
-  Server mode (SQLite + sync) is on the roadmap.
-- **Bilingual.** Polish by default, English a click away.
+BranchBoard is a Git-connected engineering board inside VS Code/Cursor that
+shows who owns each task, which branch contains the code, where that branch is
+now and what needs to happen next.
 
-## The time you save
+## Why Teams Choose It
 
-Small teams shipping AI-generated code on one repo lose time re-asking the same
-question for every branch: *is this actually safe to send to `main`?* Today
-that means opening a terminal, re-running the build, scrolling a diff, and
-typing a Slack message. BranchBoard puts all three steps on the card itself —
-the badge tells you where the code is, one click tells you if it passes your
-rules, and the paste-AI-result field gives the reviewer the full picture in one
-place. No tool currently ties branch location, automated verification, and an
-AI changes-summary together on the task card — that combination is
-BranchBoard's edge.
+- **Task equals branch.**
+  No more asking which branch belongs to which ticket.
 
-## Ideal customers
+- **Git truth, not stale status.**
+  Branch location is computed from Git: local, origin, dev, prod.
 
-Small dev teams, freelancers, software houses, Cursor/AI-agent teams, teams that
-want every task on its own branch, and legacy projects with many small fixes.
+- **Current branch focus.**
+  Developers see the linked task, changed files, commits, risk and next action
+  for the branch they are actually on.
 
-## Not trying to be
+- **Command Center for leads.**
+  Overview, Team, Branch Flow, Cleanup, Deployments, Files, Risk, Impact,
+  Activity and AI Review give a real engineering cockpit without Jira weight.
 
-A heavyweight project-management suite or a Jira clone. BranchBoard does one thing
-extremely well: connect tasks to branches, right where the code is.
+- **AI work is accountable.**
+  Prompt, plan, run output, review, changed files, token usage and cost can live
+  on the task instead of disappearing into chat history.
+
+- **Safe Git automation.**
+  BranchBoard can create, checkout, push, update, merge and clean up branches,
+  but it does not merge to main or delete branches without explicit permission.
+
+- **Local-first with a server path.**
+  Works from `.branchboard/board.json` immediately. SQLite/SSH server mode is
+  prepared for shared boards.
+
+- **Built for Cursor/VS Code.**
+  Native extension, no CDN assets, dark operational UI, local sounds,
+  workspace-level settings.
+
+- **Small-team sweet spot.**
+  Best for 2-10 person teams, software houses, freelancers and AI-assisted
+  development teams.
+
+## The Time It Saves
+
+Small teams lose time on repeat questions:
+
+- Who is doing this?
+- Which branch is it?
+- Was it pushed?
+- Is it on DEV?
+- Did tests/rules pass?
+- What changed?
+- Is it risky?
+- Did AI touch this code?
+- Can we merge?
+
+BranchBoard puts these answers next to the card and the branch. The team spends
+less time asking for status and more time reviewing actual work.
+
+## Differentiators
+
+### Compared With A Browser Board
+
+Browser boards track tasks. BranchBoard tracks tasks plus Git reality.
+
+### Compared With Git Graph
+
+Git Graph shows branches and commits. BranchBoard connects them to people,
+tasks, deployments, AI context and workflow state.
+
+### Compared With AI Chat Alone
+
+AI chat produces output. BranchBoard keeps the AI plan, result, review, changed
+files, usage and cost attached to the task and branch.
+
+### Compared With Heavy PM Tools
+
+BranchBoard is smaller, faster and closer to the repository. It is a working
+surface for developers, not a management suite.
+
+## Ideal Customers
+
+- small product teams,
+- e-commerce/legacy maintenance teams,
+- agencies and software houses,
+- freelancers with client projects,
+- Cursor-heavy teams,
+- teams using AI agents,
+- projects where every task should have a branch.
+
+## Strong Product Message
+
+BranchBoard makes branch-driven development visible and safe for small teams.
+It gives the team the confidence of a process without making them leave the
+editor or maintain a separate heavy system.
+
+## Not Trying To Be
+
+- a Jira replacement,
+- a full CI/CD platform,
+- a Git hosting provider,
+- an HR/performance analytics tool,
+- an autonomous production release bot.
+
+BranchBoard is deliberately focused: task, branch, review, deploy signal,
+safety, AI accountability and developer flow.

@@ -1,72 +1,172 @@
-# Branch Flow / Przepływ branchy
+# Branch Flow
 
-Branch Flow is the operational panel for **managing branches as tasks**. It is not
-just a list — it's where a senior/CTO sees which branches need action and acts on
-them safely.
+Branch Flow is the operational panel for managing branches as work items. It is
+part of Command Center and combines board tasks with real Git state.
 
-Przepływ branchy to operacyjne centrum zarządzania branchami jako zadaniami.
+It is not only a visual pipeline. It is also where a lead can find branches that
+need action, link them to tasks and clean them up safely.
 
-## Summary bar
+## What A Row Represents
 
-Clickable tiles set a filter: Active, Without task, Local only, Remote only,
-Backups, Stale, Cleanup, High risk.
+One row can represent:
 
-## Categories / Kategorie
+- a task with a branch,
+- a Git branch linked to a task,
+- a Git branch without a task,
+- a backup/archive branch,
+- a stale branch,
+- a branch ready for review/merge.
 
-Each branch card shows a category badge, derived from its real state:
+Data comes from:
 
-- **Active** — linked to a task and recently worked on.
-- **Without task** — exists in Git but not linked to a BranchBoard task.
-- **Local only** — exists on your machine, not pushed (others can't see it).
-- **Remote only** — on origin but not checked out locally.
-- **Backup** — `backup/…` or `archive/…` safety branches.
-- **Stale** — no activity for a while (`branchBoard.staleBranchDays`).
-- **Ready to merge** — pushed, ahead of main, not critical risk.
-- **Cleanup** — likely removable (backups, stale without a task, no commits).
-- **High risk** — flagged by the Risk Radar rules.
+- `BoardData.tasks`,
+- local Git refs,
+- remote-tracking refs,
+- branch stats against main,
+- deployments,
+- risk scoring.
 
-## Filters & search
+## Pipeline
 
-Filters: All, Mine, Active, Without task, Not pushed, Local only, Remote only,
-Backups, Stale, Ready for review, Ready to merge, Cleanup, On DEV.
+Every branch row can show:
 
-## Branch card
+```text
+Task -> Branch -> Commits -> Push -> DEV -> Review -> Testing -> Merge
+```
 
-Per branch: selection checkbox (bulk), monospace name (click to copy, hover for
-full name), category + risk + AI/DEV/current/main badges, linked task (or "no
-task"), owner avatar, ahead/behind, changed-files count, last activity, the
-pipeline (Task → Branch → Commits → Push → DEV → Review → Testing → Merge), and
-quick actions.
+The pipeline describes the operational state, not just the board column.
 
-Quick actions: **Checkout · Open task / Create task + Link task · Push · DEV ·
-More**. "Open task" reuses the existing task drawer (no second task editor).
-"More" opens the Branch Details Drawer (commits, changed files, impact areas, and
-the destructive actions).
+## Filters
 
-## Linking & creating
+Branch Flow supports filters such as:
 
-- **Create task from branch** — creates a task (title from the branch name,
-  branch linked, assigned to you) and opens it for details.
-- **Link to task** — pick a task that has no branch; the branch is attached.
+- all,
+- mine,
+- active,
+- without task,
+- not pushed,
+- local only,
+- remote only,
+- backup,
+- stale,
+- ready to review,
+- ready to merge,
+- cleanup,
+- on DEV.
 
-## Cleanup & deletion (safe)
+Stale detection is currently code-defined by `BranchAnalyticsService` and uses
+the repository's last commit timestamp. If this becomes configurable later, add
+the setting to [SETTINGS_REFERENCE.md](SETTINGS_REFERENCE.md).
 
-Destructive actions live in the Branch Details Drawer and bulk toolbar, always
-confirmed in the extension host:
+## Branch Row Content
 
-- **Archive** — tag `archive/<branch>-<ts>` then remove the local branch.
-- **Delete local** — `git branch -d` (refuses unmerged work unless
-  `branchBoard.allowForceDeleteBranch` is on, which then asks for a force
-  confirmation).
-- **Delete remote** — `git push origin --delete` with a strong warning.
-- **Bulk delete local** — select branches, one confirmation, `main` and the
-  current branch are always skipped; a report lists any skipped (unmerged).
+Typical row data:
 
-Safety rules: never delete `main`/default, never delete the current branch, never
-force-delete by default, never delete without confirmation.
+- selection checkbox for bulk operations,
+- branch name,
+- current/main/dev badges,
+- local/remote state,
+- linked task title or "no task",
+- assignee,
+- column,
+- risk level,
+- stale badge,
+- ahead/behind main,
+- changed files count,
+- last commit time/message,
+- pipeline states,
+- quick actions.
 
-## Settings
+## Quick Actions
 
-`branchBoard.allowForceDeleteBranch` (default off), `branchBoard.devBranch`,
-`branchBoard.finishOnMoveToDone`, `branchBoard.staleBranchDays`,
-`branchBoard.criticalPaths`, `branchBoard.impactAreas`.
+Depending on row state, actions include:
+
+- checkout branch,
+- push branch,
+- deploy to DEV,
+- open linked task,
+- create task from branch,
+- link branch to existing task,
+- open branch details drawer,
+- copy branch name or summary.
+
+Actions that mutate Git go back through `BoardPanel` and `GitService`.
+
+## Branch Drawer
+
+The Branch Drawer gives deeper context:
+
+- commits,
+- changed files,
+- additions/deletions,
+- open file,
+- open diff,
+- copy AI prompt,
+- push,
+- deploy to DEV,
+- create/link/open task,
+- delete local,
+- delete remote,
+- archive.
+
+Destructive actions require confirmation.
+
+## Linking And Creating Tasks
+
+### Create Task From Branch
+
+Creates a task with:
+
+- title derived from branch name,
+- branch linked,
+- current user as assignee when available,
+- default column based on board workflow.
+
+The user should then fill in description, acceptance criteria and checklist.
+
+### Link Branch To Task
+
+Attach a branch to an existing task that has no branch.
+
+This is useful when:
+
+- a developer created a branch manually,
+- a teammate pushed a branch outside BranchBoard,
+- old work is being migrated into the board.
+
+## Cleanup
+
+Cleanup actions:
+
+- archive local branch,
+- delete local branch,
+- delete remote branch,
+- bulk delete local branches.
+
+Safety:
+
+- current branch is protected,
+- main/default branch is protected,
+- bulk delete skips protected branches,
+- local delete uses safe `git branch -d`,
+- force delete requires `branchBoard.allowForceDeleteBranch` and confirmation,
+- remote delete requires confirmation,
+- archive creates an `archive/<branch>-<timestamp>` tag before local removal.
+
+## Good Review Routine
+
+For a lead:
+
+1. Filter `not pushed` and ask owners to push or remove dead work.
+2. Filter `without task` and create/link tasks.
+3. Filter `stale` and decide whether to revive, archive or delete.
+4. Filter `ready to review`.
+5. Check `high risk` rows before merge.
+6. Check DEV deployment/test status before production.
+
+## Related Docs
+
+- [COMMAND_CENTER.md](COMMAND_CENTER.md)
+- [CURRENT_BRANCH.md](CURRENT_BRANCH.md)
+- [SAFETY.md](SAFETY.md)
+- [ROLLBACK_SAFETY.md](ROLLBACK_SAFETY.md)

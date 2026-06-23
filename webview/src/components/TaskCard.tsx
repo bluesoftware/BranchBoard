@@ -69,7 +69,13 @@ export function TaskCard({
   const { appearance } = appConfig;
   const hasBranch = !!task.branchName;
   const isCurrentBranch = !!git?.currentBranch && git.currentBranch === task.branchName;
-  const isAi = !!task.ai?.createdByAi;
+  const selectedAgentId = task.aiAgents?.selectedAgentIds?.[0] ?? "";
+  const selectedAgent = selectedAgentId
+    ? appConfig.aiAgents.find((agent) => agent.id === selectedAgentId)
+    : null;
+  const aiAgentStatus = task.aiAgents?.status;
+  const isAi = !!task.ai?.createdByAi || !!task.aiAgents?.enabled || aiAgentStatus === "finished";
+  const aiHasWarning = aiAgentStatus === "failed" || /risk|ryzyk|uwag|problem/i.test(task.aiAgents?.reviewResult ?? "");
   const overdue = isDone ? null : daysOverdue(task.dueDate);
   const descriptionPreview = richTextToPlainText(task.description);
 
@@ -131,8 +137,9 @@ export function TaskCard({
           <div className="bb-task-card-titleline">
             <div className="bb-task-card-title">{task.title}</div>
             {isAi && (
-              <span className="bb-flag ai" title={t("card.aiFlag")}>
+              <span className={`bb-flag ai ${aiHasWarning ? "warn" : ""}`} title={t("card.aiFlag")}>
                 <SparkleIcon size={11} />
+                {aiAgentStatus === "failed" ? "!" : ""}
               </span>
             )}
             {due && (
@@ -153,6 +160,22 @@ export function TaskCard({
             <span className={`bb-meta-item branch ${isCurrentBranch ? "current" : ""}`} title={task.branchName}>
               <BranchIcon size={11} />
               {task.branchName.replace(/^feature\//, "")}
+            </span>
+          )}
+          {isAi && (
+            <span className={`bb-meta-item ai-agent ${aiHasWarning ? "warn" : ""}`} title={t("aiAgent.cardHint")}>
+              <SparkleIcon size={11} />
+              {selectedAgent?.name ? `AI: ${selectedAgent.name}` : "AI"}
+            </span>
+          )}
+          {aiAgentStatus && aiAgentStatus !== "not_configured" && (
+            <span className={`bb-meta-item ai-status ${aiAgentStatus === "failed" ? "warn" : ""}`}>
+              {t(`aiAgent.status.${aiAgentStatus}`)}
+            </span>
+          )}
+          {(task.aiAgents?.changedFiles?.length ?? 0) > 0 && (
+            <span className="bb-meta-item">
+              {t("aiAgent.changedFilesShort", { count: task.aiAgents?.changedFiles?.length ?? 0 })}
             </span>
           )}
           {appearance.showChecklist && checklistTotal > 0 && (

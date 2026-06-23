@@ -70,6 +70,15 @@ export class EventService {
       case "dev_deploy_failed":
         return "deploy";
       case "ai_prompt_copied":
+      case "ai_prompt_generated":
+      case "ai_agent_plan_started":
+      case "ai_agent_plan_finished":
+      case "ai_agent_run_started":
+      case "ai_agent_run_finished":
+      case "ai_agent_run_failed":
+      case "ai_review_started":
+      case "ai_review_finished":
+      case "ai_task_moved_to_local":
         return "ai";
       case "comment_added":
         return "user";

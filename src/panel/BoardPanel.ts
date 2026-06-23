@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
+import type { ChildProcess } from "child_process";
 import {
   AppConfig,
   BoardData,
@@ -14,9 +15,22 @@ import {
   NotificationType,
   OperationResult,
   OutboundMessage,
+  TaskAIAgents,
+  AiCostDecisionRequestPayload,
+  AiCostDecisionPayload,
 } from "../types";
 import { BoardService } from "../services/BoardService";
 import { GitService, finishTaskGitFlow } from "../services/GitService";
+import {
+  AIAgentProcessResult,
+  AIAgentRunKind,
+  AIAgentService,
+  computeAIAgentCost,
+  resolveAIAgentModelPricing,
+} from "../services/AIAgentService";
+import { CursorAgentsService } from "../services/CursorAgentsService";
+import { AiCostOptimizer } from "../services/AiCostOptimizer";
+import { AiSessionMemoryService } from "../services/AiSessionMemoryService";
 import { CommandRunnerService, HookContext } from "../services/CommandRunnerService";
 import { ColumnHook } from "../types";
 import { BranchAnalyticsService } from "../services/BranchAnalyticsService";
@@ -59,9 +73,11 @@ export function resolveCurrentUserId(
   git: GitInfo,
   config: BranchBoardConfig
 ): string | null {
-  if (config.currentUser && board.users.some((u) => u.id === config.currentUser)) {
-    return config.currentUser;
-  }
+  // When auto-detection is enabled, the *live* Git identity always wins over
+  // a previously cached `currentUser` setting. Otherwise switching the Git
+  // account (e.g. `git config user.email`) would silently keep showing the
+  // old "me" profile forever, since `currentUser` is just a cache of the
+  // last resolved match (see the "changeUser" / "redetectUser" message).
   if (config.autoDetectGitUser) {
     const gitEmail = emailKey(git.userEmail);
     const gitName = normalizeIdentity(git.userName);
@@ -93,6 +109,11 @@ export function resolveCurrentUserId(
       }
     }
   }
+  // No live Git match (detection disabled, no repo, or no matching board
+  // user yet) — fall back to whatever was last resolved/selected.
+  if (config.currentUser && board.users.some((u) => u.id === config.currentUser)) {
+    return config.currentUser;
+  }
   return board.users[0]?.id ?? null;
 }
 
@@ -107,6 +128,10 @@ export class WebviewController {
   private configSub: vscode.Disposable | undefined;
   private readonly analytics: BranchAnalyticsService;
   private readonly runner: CommandRunnerService;
+  private readonly aiAgent: AIAgentService;
+  private readonly cursorAgents: CursorAgentsService;
+  private readonly aiCostOptimizer: AiCostOptimizer;
+  private readonly aiSessionMemory = new AiSessionMemoryService();
   /** Set once the webview requests dashboard data, so we keep it live on changes. */
   private dashboardRequested = false;
   private lastUsersSignature = "";
@@ -119,6 +144,17 @@ export class WebviewController {
   /** The board user id resolved for THIS extension/window instance — used to
    *  decide whether a native toast for a notification should appear here. */
   private currentUserId: string | null = null;
+  /**
+   * Tasks that currently have an AI agent process running. This is the
+   * authoritative server-side lock: the webview also disables its run
+   * buttons while busy, but that's only UX — a quick double-click or a
+   * second webview instance must not be able to start two agent processes
+   * for the same task concurrently, so every entry point into
+   * runAIAgentWorkflow checks this set first.
+   */
+  private readonly runningAgentTasks = new Set<string>();
+  /** Live child process for each task with an agent currently running — lets the "Stop" button kill it. */
+  private readonly agentProcesses = new Map<string, ChildProcess>();
 
   constructor(
     private readonly webview: vscode.Webview,
@@ -126,6 +162,9 @@ export class WebviewController {
   ) {
     this.analytics = new BranchAnalyticsService(this.deps.git);
     this.runner = new CommandRunnerService(this.deps.git.getCwd(), this.deps.getConfig);
+    this.aiAgent = new AIAgentService(this.deps.git.getCwd(), this.deps.getConfig);
+    this.cursorAgents = new CursorAgentsService(this.deps.git.getCwd());
+    this.aiCostOptimizer = new AiCostOptimizer(this.deps.git.getCwd(), this.deps.getConfig, this.deps.git);
     this.webview.options = {
       enableScripts: true,
       localResourceRoots: [
@@ -191,6 +230,12 @@ export class WebviewController {
     this.post({ type: "boardData", payload: board });
   }
 
+  /** Pushes the current set of discovered Cursor sub-agent personas to the webview. */
+  private async postCursorAgents() {
+    const agents = await this.cursorAgents.listAgents();
+    this.post({ type: "cursorAgents", payload: { agents } });
+  }
+
   private usersSignature(board: BoardData): string {
     return board.users.map((u) => `${u.id}:${u.name}:${u.email}`).join("|");
   }
@@ -221,8 +266,10 @@ export class WebviewController {
         sqliteRemotePath: c.sqliteRemotePath,
       },
       appearance: c.appearance,
+      titleBar: c.titleBar,
       notifications: c.notifications,
       adminAnnouncement: c.adminAnnouncement,
+      aiAgents: c.aiAgents,
       soundFiles: this.getSoundFileUris(),
       policy: {
         allowDirectMergeToMain: c.allowDirectMergeToMain,
@@ -255,6 +302,22 @@ export class WebviewController {
         devBranch: c.devBranch,
         runGitActionsOnMove: c.runGitActionsOnMove,
         confirmGitActionsOnMove: c.confirmGitActionsOnMove,
+        enableAIAgentColumn: c.enableAIAgentColumn,
+        aiAgentColumnId: c.aiAgentColumnId,
+        requireConfirmationBeforeAIAgentRun: c.requireConfirmationBeforeAIAgentRun,
+        requireCleanTreeBeforeAIAgentRun: c.requireCleanTreeBeforeAIAgentRun,
+        aiAgentTimeoutSeconds: c.aiAgentTimeoutSeconds,
+        allowedAIAgentCommands: c.allowedAIAgentCommands,
+        defaultAIBranchPrefix: c.defaultAIBranchPrefix,
+        moveToLocalAfterAIAgentSuccess: c.moveToLocalAfterAIAgentSuccess,
+        optimizePromptsBeforeSend: c.optimizePromptsBeforeSend,
+        promptOptimizerAgentId: c.promptOptimizerAgentId,
+        promptOptimizerModel: c.promptOptimizerModel,
+        promptOptimizationRules: c.promptOptimizationRules,
+        aiCostMode: c.aiCostMode,
+        aiLocalOptimizerEnabled: c.aiLocalOptimizer.enabled,
+        aiLocalOptimizerProvider: c.aiLocalOptimizer.provider,
+        aiCli: c.aiCli,
       },
     };
     this.post({ type: "appConfig", payload });
@@ -263,10 +326,24 @@ export class WebviewController {
   private async postGitInfo() {
     const info = await this.deps.git.getInfo();
     const board = this.deps.board.getBoard();
-    const currentUserId = resolveCurrentUserId(board, info, this.deps.getConfig());
+    const config = this.deps.getConfig();
+    const currentUserId = resolveCurrentUserId(board, info, config);
     this.currentUserId = currentUserId;
     this.deps.board.setNotificationContext(currentUserId ?? "");
     this.post({ type: "gitInfo", payload: { git: info, currentUserId } });
+    // Keep the cached `currentUser` setting in sync with what was just
+    // auto-detected from Git, so other code paths that read the raw config
+    // value directly (deploy logs, admin announcements, etc.) don't show a
+    // stale "me" after the Git identity changes.
+    if (
+      config.autoDetectGitUser &&
+      currentUserId &&
+      currentUserId !== config.currentUser
+    ) {
+      void vscode.workspace
+        .getConfiguration("branchBoard")
+        .update("currentUser", currentUserId, vscode.ConfigurationTarget.Workspace);
+    }
   }
 
   /**
@@ -349,6 +426,467 @@ export class WebviewController {
     await this.deps.board.logEvent(result.ok ? "task_updated" : "merge_failed", {
       taskId,
       payload: { kind: "rules_verification", ok: result.ok, command },
+    });
+  }
+
+  private defaultAIAgentsState(task: BoardTask): TaskAIAgents {
+    const enabledAgents = this.deps.getConfig().aiAgents.filter((agent) => agent.enabled);
+    return {
+      enabled: task.aiAgents?.enabled ?? false,
+      status: task.aiAgents?.status ?? "not_configured",
+      selectedAgentIds:
+        task.aiAgents?.selectedAgentIds && task.aiAgents.selectedAgentIds.length > 0
+          ? task.aiAgents.selectedAgentIds
+          : enabledAgents[0]
+            ? [enabledAgents[0].id]
+            : [],
+      selectedCursorAgentIds: task.aiAgents?.selectedCursorAgentIds ?? [],
+      selectedModel: task.aiAgents?.selectedModel || "auto",
+      prompt: task.aiAgents?.prompt ?? "",
+      plan: task.aiAgents?.plan ?? "",
+      planFile: task.aiAgents?.planFile ?? "",
+      result: task.aiAgents?.result ?? "",
+      reviewResult: task.aiAgents?.reviewResult ?? "",
+      lastRunAt: task.aiAgents?.lastRunAt,
+      lastFinishedAt: task.aiAgents?.lastFinishedAt,
+      error: task.aiAgents?.error ?? "",
+      createdBranch: task.aiAgents?.createdBranch ?? "",
+      changedFiles: task.aiAgents?.changedFiles ?? [],
+      runHistory: task.aiAgents?.runHistory ?? [],
+    };
+  }
+
+  private async generateAIAgentPrompt(taskId: string): Promise<OperationResult | undefined> {
+    const { board, git } = this.deps;
+    const task = board.getBoard().tasks.find((t) => t.id === taskId);
+    if (!task) {
+      return undefined;
+    }
+    const gitInfo = await git.getInfo();
+    const selectedCursorAgents = await this.cursorAgents.getAgentsByIds(task.aiAgents?.selectedCursorAgentIds ?? []);
+    const prompt = this.aiAgent.buildPrompt(board.getBoard(), task, gitInfo, selectedCursorAgents);
+    const aiAgents = {
+      ...this.defaultAIAgentsState(task),
+      enabled: true,
+      status: "ready" as const,
+      prompt,
+      error: "",
+    };
+    await board.updateTask(task.id, { aiAgents });
+    await board.logEvent("ai_prompt_generated", {
+      taskId: task.id,
+      branchName: task.branchName || aiAgents.createdBranch || null,
+      payload: { title: task.title },
+    });
+    return { ok: true, action: "generateAIAgentPrompt", message: t("aiAgent.promptGenerated") };
+  }
+
+  /**
+   * AI Cost Guard / Local AI Optimizer entry point — decides what to send to
+   * Cursor CLI (or whether to bother at all) without ever running Git or
+   * Cursor CLI itself. See AiCostOptimizer for the full contract. The result
+   * is posted back as "aiCostDecision" and the decision (plus a refreshed
+   * chat summary) is persisted onto the task so later turns can skip
+   * re-sending full history once a summary exists.
+   */
+  private async handleAiCostDecision(msg: InboundMessage) {
+    const payload = (msg.payload ?? {}) as AiCostDecisionRequestPayload;
+    const taskId = String(payload.taskId ?? "");
+    const { board } = this.deps;
+    const task = board.getBoard().tasks.find((t) => t.id === taskId);
+    if (!task) {
+      return;
+    }
+
+    // Keep the rolling chat summary fresh before deciding so the optimizer
+    // can prefer it over raw history. Deterministic, no model call.
+    this.aiSessionMemory.refreshChatSummary(task, task.comments ?? [], board.getBoard().users);
+
+    let decision;
+    try {
+      decision = await this.aiCostOptimizer.decide(task, {
+        taskId,
+        userMessage: String(payload.userMessage ?? ""),
+        forceAction: payload.forceAction,
+        forceContextLevel: payload.forceContextLevel,
+        confirmed: payload.confirmed,
+      });
+    } catch (err: any) {
+      this.post({
+        type: "error",
+        payload: { action: "getAiCostDecision", message: err?.message || String(err) },
+      });
+      return;
+    }
+
+    await board.updateTask(task.id, {
+      aiAgents: {
+        ...this.defaultAIAgentsState(task),
+        costMemory: task.aiAgents?.costMemory,
+        lastCostDecision: decision,
+      },
+    });
+
+    const response: AiCostDecisionPayload = { taskId, ...decision };
+    this.post({ type: "aiCostDecision", payload: response });
+  }
+
+  private async confirmAIAgentRun(detail: string): Promise<boolean> {
+    if (!this.deps.getConfig().requireConfirmationBeforeAIAgentRun) {
+      return true;
+    }
+    return (
+      (await vscode.window.showWarningMessage(
+        t("aiAgent.confirmRunTitle"),
+        { modal: true, detail },
+        t("aiAgent.confirmRunAction")
+      )) === t("aiAgent.confirmRunAction")
+    );
+  }
+
+  private async runAIAgentWorkflow(taskId: string, kind: AIAgentRunKind): Promise<OperationResult | undefined> {
+    const { board, git, getConfig } = this.deps;
+    const cfg = getConfig();
+    const task = board.getBoard().tasks.find((t) => t.id === taskId);
+    if (!task) {
+      return undefined;
+    }
+    // Server-side busy lock — see the field doc comment on runningAgentTasks.
+    // The webview also disables its buttons while busy, but this is the
+    // real guard: it stops a second agent process from ever being spawned
+    // for the same task, no matter how the request got through.
+    if (this.runningAgentTasks.has(taskId)) {
+      const res = { ok: false, action: `aiAgent.${kind}`, message: t("aiAgent.alreadyRunning") };
+      this.post({ type: "operationResult", payload: res });
+      this.toast(res);
+      return res;
+    }
+    let aiAgents = this.defaultAIAgentsState(task);
+    const agentId = aiAgents.selectedAgentIds[0];
+    const agent = agentId ? this.aiAgent.getAgent(agentId) : null;
+    if (!agent) {
+      const res = { ok: false, action: `aiAgent.${kind}`, message: t("aiAgent.noAgentSelected") };
+      this.post({ type: "operationResult", payload: res });
+      this.toast(res);
+      return res;
+    }
+    if (cfg.requireCleanTreeBeforeAIAgentRun && (await git.hasUncommittedChanges())) {
+      const res = { ok: false, action: `aiAgent.${kind}`, message: t("aiAgent.dirtyTree") };
+      this.post({ type: "operationResult", payload: res });
+      this.toast(res);
+      return res;
+    }
+
+    const selectedCursorAgents = await this.cursorAgents.getAgentsByIds(aiAgents.selectedCursorAgentIds ?? []);
+    const generatedPrompt =
+      aiAgents.prompt || this.aiAgent.buildPrompt(board.getBoard(), task, await git.getInfo(), selectedCursorAgents);
+    let branchName = task.branchName || aiAgents.createdBranch || this.aiAgent.suggestBranchName(task);
+    let planFile = aiAgents.planFile ?? "";
+    if (kind === "plan") {
+      try {
+        planFile = this.aiAgent.writePlanFile(
+          task,
+          "Plan is being prepared by the configured AI agent. BranchBoard will update this file when the plan run finishes.",
+          branchName,
+          agent.name
+        );
+      } catch (err: any) {
+        Logger.warn(`[ai-agent] failed to create initial plan file: ${err?.message ?? String(err)}`);
+      }
+    }
+
+    if (kind === "run") {
+      const ensured = await git.ensureBranch(branchName);
+      if (!ensured.ok) {
+        const next = {
+          ...aiAgents,
+          enabled: true,
+          status: "failed" as const,
+          prompt: generatedPrompt,
+          error: ensured.detail || ensured.message,
+        };
+        await board.updateTask(task.id, { aiAgents: next });
+        this.post({ type: "operationResult", payload: ensured });
+        this.toast(ensured);
+        return ensured;
+      }
+      if (!task.branchName) {
+        await board.updateTask(task.id, { branchName, aiAgents: { ...aiAgents, createdBranch: branchName } });
+      }
+      await board.logEvent("branch_created", { taskId: task.id, branchName });
+    }
+
+    // When a plan was already generated and accepted for this task, "Praca AI"
+    // must execute against it instead of silently re-deriving its own plan
+    // from scratch — otherwise the Plan step is disconnected from the actual
+    // run, which defeats its purpose (review/approve before work starts).
+    const approvedPlan = aiAgents.plan?.trim();
+    const priorRunResult = aiAgents.result?.trim();
+    const prompt =
+      kind === "plan"
+        ? [
+            generatedPrompt,
+            "",
+            "# TRYB",
+            "Przygotuj wyłącznie krótki plan. Nie zmieniaj plików.",
+            planFile ? `Zapisz finalny plan także do pliku: ${planFile}` : "",
+          ].filter(Boolean).join("\n")
+        : kind === "review"
+          ? [
+              generatedPrompt,
+              "",
+              "# TRYB",
+              "Wykonaj review względem opisu zadania, checklisty i aktualnych zmian. Nie zmieniaj plików.",
+              // Bez wyniku kroku "Praca AI" (run) review ocenia tylko opis zadania
+              // i aktualny stan repo, nie wiedząc co konkretnie agent zrobił i
+              // dlaczego — dlatego, jeśli run już się odbył, doklejamy jego wynik
+              // jako kontekst (łańcuch Plan → Run → Review musi być spójny).
+              priorRunResult
+                ? [
+                    "",
+                    "# WYNIK KROKU „PRACA AI” (RUN)",
+                    "Poniżej znajduje się wynik raportowany przez agenta podczas wykonania zadania (krok „Praca AI”). Użyj go jako kontekstu — sprawdź, czy opisane zmiany faktycznie odpowiadają temu, co widzisz w repozytorium, i czy realizują zadanie.",
+                    priorRunResult,
+                  ].join("\n")
+                : "",
+            ].filter(Boolean).join("\n")
+          : approvedPlan
+            ? [
+                generatedPrompt,
+                "",
+                "# ZATWIERDZONY PLAN",
+                "Poniższy plan został wcześniej przygotowany dla tego zadania (krok „Plan”). Zrealizuj zadanie zgodnie z nim — nie twórz nowego planu od zera. Jeśli plan jest w oczywistej sprzeczności z aktualnym stanem repozytorium, krótko to odnotuj w wyniku i kontynuuj najbliższym bezpiecznym podejściem.",
+                approvedPlan,
+                planFile ? `Plik planu: ${planFile}` : "",
+              ].filter(Boolean).join("\n")
+            : generatedPrompt;
+
+    // Optional prompt-optimization pass: a fast/cheap model rewrites `prompt`
+    // for the target agent before it is actually sent. Purely textual — it
+    // never executes the task and never blocks the real run: any failure
+    // (missing/blocked command, timeout, empty result) just falls back to
+    // the original, unoptimized prompt below.
+    let finalPrompt = prompt;
+    if (cfg.optimizePromptsBeforeSend) {
+      const optimizerAgent = cfg.promptOptimizerAgentId
+        ? this.aiAgent.getAgent(cfg.promptOptimizerAgentId) ?? agent
+        : agent;
+      const optimization = await this.aiAgent.optimizePrompt(
+        optimizerAgent,
+        cfg.promptOptimizerModel || aiAgents.selectedModel || "",
+        prompt,
+        cfg.promptOptimizationRules || "",
+        task,
+        kind,
+        branchName
+      );
+      finalPrompt = optimization.prompt;
+      if (optimization.ok) {
+        Logger.info(`[ai-agent] prompt optimized for ${kind} (task ${task.id}) using ${optimizerAgent.name}`);
+      } else {
+        Logger.warn(
+          `[ai-agent] prompt optimization skipped for ${kind} (task ${task.id}): ${optimization.message ?? ""} ${optimization.detail ?? ""}`.trim()
+        );
+      }
+    }
+
+    const preview = this.aiAgent.preparePreview(
+      agent,
+      task,
+      kind,
+      finalPrompt,
+      aiAgents.selectedModel ?? "",
+      branchName
+    );
+    const displayArgs = this.aiAgent.summarizeArgsForDisplay(preview.args, finalPrompt, preview.promptFile);
+    const detail = [
+      `${t("aiAgent.agent")}: ${agent.name}`,
+      `${t("aiAgent.command")}: ${preview.command} ${displayArgs.join(" ")}`,
+      `${t("aiAgent.branch")}: ${branchName}`,
+      `${t("aiAgent.promptFile")}: ${preview.promptFile}`,
+      "",
+      t("aiAgent.confirmRunDetail"),
+    ].join("\n");
+    if (!(await this.confirmAIAgentRun(detail))) {
+      const res = { ok: false, action: `aiAgent.${kind}`, message: t("aiAgent.cancelled") };
+      this.post({ type: "operationResult", payload: res });
+      return res;
+    }
+
+    const startedAt = new Date().toISOString();
+    const status =
+      kind === "plan" ? ("planning" as const) : kind === "review" ? ("reviewing" as const) : ("running" as const);
+    aiAgents = {
+      ...this.defaultAIAgentsState(board.getBoard().tasks.find((t) => t.id === task.id) ?? task),
+      enabled: true,
+      status,
+      prompt: generatedPrompt,
+      error: "",
+      lastRunAt: startedAt,
+      createdBranch: branchName,
+      planFile,
+    };
+    await board.updateTask(task.id, {
+      aiAgents,
+      ai: {
+        createdByAi: true,
+        usedModel: aiAgents.selectedModel ?? "",
+        generatedPrompt,
+        aiNotes: task.ai?.aiNotes ?? "",
+        reviewChecklist: task.ai?.reviewChecklist ?? [],
+      },
+    });
+    await board.logEvent(
+      kind === "plan" ? "ai_agent_plan_started" : kind === "review" ? "ai_review_started" : "ai_agent_run_started",
+      { taskId: task.id, branchName, payload: { agentId: agent.id, model: aiAgents.selectedModel ?? "" } }
+    );
+
+    Logger.info(`[ai-agent] ${agent.name}: ${preview.command} ${preview.args.join(" ")}`);
+    this.runningAgentTasks.add(taskId);
+    this.post({ type: "aiAgentLifecycle", payload: { taskId, kind, phase: "started" } });
+    let result: AIAgentProcessResult;
+    try {
+      result = await this.aiAgent.run(preview, kind, {
+        onChunk: (stream, text) => {
+          this.post({ type: "aiAgentLog", payload: { taskId, kind, stream, text } });
+        },
+        onProcessStarted: (proc) => {
+          this.agentProcesses.set(taskId, proc);
+        },
+      });
+    } finally {
+      this.runningAgentTasks.delete(taskId);
+      this.agentProcesses.delete(taskId);
+    }
+    this.post({
+      type: "aiAgentLifecycle",
+      payload: {
+        taskId,
+        kind,
+        phase: result.cancelled ? "cancelled" : result.ok ? "finished" : "failed",
+        message: result.message,
+      },
+    });
+    const finishedAt = new Date().toISOString();
+    const changedFiles = kind === "run" && result.ok ? await git.getWorkingTreeChangedFiles() : aiAgents.changedFiles ?? [];
+    const planText = kind === "plan" ? result.plan || result.result || result.stdout : result.plan;
+    if (result.ok && kind === "plan" && planText?.trim()) {
+      try {
+        planFile = this.aiAgent.writePlanFile(task, planText, branchName, agent.name);
+      } catch (err: any) {
+        Logger.warn(`[ai-agent] failed to write plan file: ${err?.message ?? String(err)}`);
+      }
+    }
+    // Approximate cost from the agent's optional, user-configured pricing.
+    // Stays undefined (never guessed) when either usage or pricing wasn't
+    // available — see computeAIAgentCost's doc comment.
+    const cost = computeAIAgentCost(result.usage, resolveAIAgentModelPricing(agent, aiAgents.selectedModel));
+    const history = [
+      ...(aiAgents.runHistory ?? []),
+      {
+        id: `airun_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        agentId: agent.id,
+        model: aiAgents.selectedModel,
+        status: result.ok ? ("finished" as const) : result.cancelled ? ("cancelled" as const) : ("failed" as const),
+        kind,
+        startedAt,
+        finishedAt,
+        prompt: finalPrompt,
+        plan: planText,
+        result: result.result || result.stdout,
+        reviewResult: result.reviewResult,
+        changedFiles: kind === "run" ? changedFiles : undefined,
+        error: result.ok ? undefined : result.detail || result.stderr,
+        branch: branchName,
+        usage: result.usage,
+        cost,
+      },
+    ].slice(-20);
+    const nextAIAgents: TaskAIAgents = {
+      ...aiAgents,
+      status: result.ok ? "finished" : result.cancelled ? "cancelled" : "failed",
+      plan: planText ?? aiAgents.plan,
+      planFile,
+      result: kind === "run" ? result.result || result.stdout || aiAgents.result : aiAgents.result,
+      reviewResult: kind === "review" ? result.reviewResult || result.result || result.stdout : aiAgents.reviewResult,
+      error: result.ok ? "" : result.detail || result.stderr || result.message,
+      lastFinishedAt: finishedAt,
+      createdBranch: branchName,
+      changedFiles,
+      runHistory: history,
+      lastUsage: result.usage ?? aiAgents.lastUsage,
+      lastCost: cost ?? aiAgents.lastCost,
+    };
+    await board.updateTask(task.id, { branchName, aiAgents: nextAIAgents });
+    await board.logEvent(
+      result.ok
+        ? kind === "plan"
+          ? "ai_agent_plan_finished"
+          : kind === "review"
+            ? "ai_review_finished"
+            : "ai_agent_run_finished"
+        : "ai_agent_run_failed",
+      {
+        taskId: task.id,
+        branchName,
+        payload: { agentId: agent.id, kind, ok: result.ok, changedFiles: changedFiles.length },
+      }
+    );
+
+    if (result.ok && kind === "run" && cfg.moveToLocalAfterAIAgentSuccess) {
+      const fresh = board.getBoard().tasks.find((t) => t.id === task.id);
+      const localColumnId = board.findLocalColumnId();
+      if (fresh && fresh.columnId !== localColumnId) {
+        await board.moveTask(task.id, localColumnId, 0);
+        await board.logEvent("ai_task_moved_to_local", {
+          taskId: task.id,
+          branchName,
+          payload: { agentId: agent.id, columnId: localColumnId },
+        });
+      }
+    }
+
+    this.reply({ type: `${kind === "plan" ? "runAIAgentPlan" : kind === "review" ? "runAIAgentReview" : "runAIAgent"}` } as InboundMessage, result);
+    this.toast(result);
+    await this.postGitInfo();
+    return result;
+  }
+
+  /**
+   * "Stop" button handler: kills the live child process for this task, if
+   * any. The actual status update + lifecycle "cancelled" event happen in
+   * runAIAgentWorkflow once the killed process's `close` event fires and
+   * `aiAgent.run()`'s promise settles — this method only requests the kill.
+   */
+  private cancelAIAgentRun(taskId: string): void {
+    const proc = this.agentProcesses.get(taskId);
+    if (!proc) {
+      const res = { ok: false, action: "aiAgent.cancel", message: t("aiAgent.noActiveRun") };
+      this.post({ type: "operationResult", payload: res });
+      return;
+    }
+    proc.kill("SIGTERM");
+    this.post({
+      type: "operationResult",
+      payload: { ok: true, action: "aiAgent.cancel", message: t("aiAgent.stopRequested") },
+    });
+  }
+
+  private async markAIAgentResult(taskId: string, accepted: boolean): Promise<void> {
+    const task = this.deps.board.getBoard().tasks.find((t) => t.id === taskId);
+    if (!task) {
+      return;
+    }
+    const aiAgents = {
+      ...this.defaultAIAgentsState(task),
+      status: accepted ? ("finished" as const) : ("failed" as const),
+      error: accepted ? "" : t("aiAgent.rejected"),
+    };
+    await this.deps.board.updateTask(task.id, { aiAgents });
+    await this.deps.board.logEvent("task_updated", {
+      taskId: task.id,
+      branchName: task.branchName || aiAgents.createdBranch || null,
+      payload: { aiAgentResultAccepted: accepted },
     });
   }
 
@@ -805,6 +1343,7 @@ export class WebviewController {
           this.postAppConfig();
           this.postBoard(board.getBoard());
           await this.postGitInfo();
+          await this.postCursorAgents();
           if (this.pendingPage) {
             this.post({ type: "navigate", payload: { page: this.pendingPage, taskId: this.pendingTaskId } });
             this.pendingTaskId = undefined;
@@ -1183,6 +1722,54 @@ export class WebviewController {
           break;
         }
 
+        case "getCursorAgents": {
+          // Explicit refresh requests bypass the short-lived cache so newly
+          // added/edited .cursor/agents/*.md files show up immediately.
+          if (msg.payload?.refresh) {
+            this.cursorAgents.invalidate();
+          }
+          await this.postCursorAgents();
+          break;
+        }
+
+        case "listAIAgentModels": {
+          const agentId = String(msg.payload?.agentId ?? "");
+          const agent = (getConfig().aiAgents || []).find((candidate) => candidate.id === agentId);
+          if (!agent) {
+            this.post({
+              type: "aiAgentModelsResult",
+              payload: { agentId, ok: false, models: [], modelsMissingPrice: [], message: t("aiAgent.modelsFetchFailed", { name: agentId }) },
+            });
+            break;
+          }
+          const fetched = await this.aiAgent.listModels(agent);
+          // Merge freshly-discovered models with whatever was already
+          // configured so "models missing a price" reflects the full known
+          // set, not just what this particular CLI call happened to return.
+          const knownModels = Array.from(
+            new Set([...(agent.models ?? []), ...fetched.models, ...((agent.modelPricing ?? []).map((m) => m.modelId))])
+          );
+          const modelsMissingPrice = knownModels.filter((modelId) => {
+            const override = (agent.modelPricing ?? []).find((m) => m.modelId === modelId);
+            const pricing = override?.pricing ?? agent.pricing;
+            const hasRate =
+              !!pricing && (pricing.inputPerMTok || pricing.outputPerMTok || pricing.cacheReadPerMTok || pricing.cacheWritePerMTok);
+            return !hasRate;
+          });
+          this.post({
+            type: "aiAgentModelsResult",
+            payload: {
+              agentId,
+              ok: fetched.ok,
+              models: fetched.models,
+              modelsMissingPrice,
+              message: fetched.message,
+              detail: fetched.detail,
+            },
+          });
+          break;
+        }
+
         case "testConnection": {
           const cfg = getConfig();
           Logger.info("Connection test requested from settings.");
@@ -1477,6 +2064,43 @@ export class WebviewController {
           await this.runTaskVerification(String(msg.payload?.taskId ?? ""));
           break;
 
+        case "generateAIAgentPrompt": {
+          const res = await this.generateAIAgentPrompt(String(msg.payload?.taskId ?? ""));
+          if (res) {
+            this.reply(msg, res);
+          }
+          break;
+        }
+
+        case "getAiCostDecision": {
+          await this.handleAiCostDecision(msg);
+          break;
+        }
+
+        case "runAIAgentPlan":
+          await this.runAIAgentWorkflow(String(msg.payload?.taskId ?? ""), "plan");
+          break;
+
+        case "runAIAgent":
+          await this.runAIAgentWorkflow(String(msg.payload?.taskId ?? ""), "run");
+          break;
+
+        case "runAIAgentReview":
+          await this.runAIAgentWorkflow(String(msg.payload?.taskId ?? ""), "review");
+          break;
+
+        case "acceptAIAgentResult":
+          await this.markAIAgentResult(String(msg.payload?.taskId ?? ""), true);
+          break;
+
+        case "rejectAIAgentResult":
+          await this.markAIAgentResult(String(msg.payload?.taskId ?? ""), false);
+          break;
+
+        case "cancelAIAgent":
+          this.cancelAIAgentRun(String(msg.payload?.taskId ?? ""));
+          break;
+
         case "createTask": {
           const created = await board.createTask(msg.payload);
           await this.notify("task_created", {
@@ -1502,6 +2126,20 @@ export class WebviewController {
           }
           const nextColumnId = typeof patch.columnId === "string" ? patch.columnId : null;
           if (nextColumnId && nextColumnId !== task.columnId) {
+            const aiColumnId = board.findAIAgentColumnId(getConfig().aiAgentColumnId);
+            if (aiColumnId && nextColumnId === aiColumnId) {
+              const aiState = this.defaultAIAgentsState({ ...task, ...patch });
+              if (!aiState.enabled || aiState.selectedAgentIds.length === 0) {
+                const res = { ok: false, action: "updateTask", message: t("aiAgent.moveMissingConfig") };
+                this.postBoard(board.getBoard());
+                this.reply(msg, res);
+                this.toast(res);
+                break;
+              }
+              if (!aiState.prompt) {
+                await this.generateAIAgentPrompt(task.id);
+              }
+            }
             const fromColumnId = task.columnId;
             const fromIndex = (task.position ?? 1) - 1;
             const leavingProduction =
@@ -1552,6 +2190,20 @@ export class WebviewController {
               this.reply(msg, guard);
               this.toast(guard);
               break;
+            }
+            const aiColumnId = board.findAIAgentColumnId(cfg.aiAgentColumnId);
+            if (changingColumn && aiColumnId && toColumnId === aiColumnId) {
+              const aiState = this.defaultAIAgentsState(before);
+              if (!aiState.enabled || aiState.selectedAgentIds.length === 0) {
+                const res = { ok: false, action: "moveTask", message: t("aiAgent.moveMissingConfig") };
+                this.postBoard(board.getBoard());
+                this.reply(msg, res);
+                this.toast(res);
+                break;
+              }
+              if (!aiState.prompt) {
+                await this.generateAIAgentPrompt(before.id);
+              }
             }
           }
 
@@ -2231,6 +2883,17 @@ export class BoardPanel {
   private constructor(private readonly panel: vscode.WebviewPanel, deps: ControllerDeps) {
     this.controller = new WebviewController(panel.webview, deps);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    // The panel's tab title is only set once at creation time by VS Code's
+    // API — keep it in sync if the user renames the board via
+    // branchBoard.boardTitle (Settings → Ogólne → "Tytuł tablicy") without
+    // requiring them to close and reopen the panel.
+    this.disposables.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration("branchBoard.boardTitle")) {
+          this.panel.title = deps.getConfig().boardTitle || "BranchBoard";
+        }
+      })
+    );
   }
 
   private dispose() {

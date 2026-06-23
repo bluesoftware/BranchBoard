@@ -66,5 +66,13 @@
   "branchBoard.appearance.compactMode": false,
   "branchBoard.aiPromptTemplate": "",
   "git.autofetch": true,
-  "git.autofetchPeriod": 10
+  "git.autofetchPeriod": 10,
+  "workbench.colorCustomizations": {
+    "titleBar.activeBackground": "#282c34",
+    "titleBar.activeForeground": "#cccccc",
+    "titleBar.activeBorder": "#011627",
+    "titleBar.border": "#011627",
+    "titleBar.inactiveBackground": "#282a36",
+    "titleBar.inactiveForeground": "#ffffff"
+  }
 }

@@ -1,112 +1,291 @@
 # BranchBoard Command Center
 
-The Command Center is the second product layer of BranchBoard: a lightweight
-"engineering command center" for a senior / CTO / tech lead managing a small
-team (up to ~10 developers). It answers not only *"what is left to do"* but
-*"what is happening with the code"* — branches, commits, review, testing, risks
-and team activity — without turning into a heavy Jira.
+Command Center is the operational layer of BranchBoard. It is built for a
+senior developer, tech lead or CTO who needs to understand what is happening in
+the repository without interrupting the team for status updates.
 
-Centrum dowodzenia to drugi poziom produktu BranchBoard: lekkie centrum
-dowodzenia kodem dla seniora / CTO / lidera technicznego małego zespołu. Pokazuje
-nie tylko "co jest do zrobienia", ale też "co dzieje się z kodem".
+It answers:
 
-## How to open / Jak otworzyć
+- what is active,
+- what is blocked,
+- which branches are not pushed,
+- which work is ready for review or merge,
+- what reached DEV,
+- what is risky,
+- what changed,
+- what AI-assisted work needs review,
+- which local branches should be cleaned up.
 
-- Click **Command Center / Centrum dowodzenia** in the board top bar, or
-- Run the command **BranchBoard: Open Command Center** (`branchBoard.openCommandCenter`), or
-- Use the icon in the BranchBoard sidebar view title.
+Opening Command Center is read-only for Git analytics. It should not fetch, pull,
+push, merge or delete anything until the user clicks an explicit action.
 
-An **Open dashboard** button is present in the header as the entry point for a
-future "open in browser" mode (architecture is prepared; not yet implemented).
+## Opening
 
-## Implemented now (Stage 1) / Zaimplementowane (Etap 1)
+- Board top navigation: **Command Center / Centrum dowodzenia**.
+- Command palette: `BranchBoard: Open Command Center`.
+- Activity Bar WebView title actions.
 
-- **Overview / Przegląd** — KPI tiles (active, in progress, in review, in testing,
-  ready to merge, blocked, branches without task, tasks without branch, done this
-  week) plus an automatic **"Needs attention"** list (stuck tasks, branches with
-  no commits, not pushed, large divergence from main, no assignee, branch not
-  linked to a task, review/testing without a DEV deploy).
-- **Team / Zespół** — per-developer workload (active, review, testing, done this
-  week, branch count, last activity, blockers) with simple progress bars. Framed
-  to detect bottlenecks, not to judge people.
-- **Branch Flow / Przepływ branchy** — the signature view. Each branch is a card
-  with a visual pipeline **Task → Branch → Commits → Push → DEV → Review →
-  Testing → Merge**, commit ahead/behind counts, changed-files count, last commit
-  time, pushed / DEV / stale / risk badges, and filters (all, mine, stale, ready
-  to merge, not pushed, no task, on DEV).
-- **Activity / Aktywność** — a timeline grouped by Today / Yesterday / This week /
-  Earlier, filterable by category (task, git, deploy, ai, comments). Events are
-  recorded into `board.json` (`events[]`).
+## Tabs
 
-All git analytics are **read-only and network-free** (local refs and
-remote-tracking refs only) so opening the dashboard never triggers a fetch.
+### Overview
 
-## Implemented now (Stage 2) / Zaimplementowane (Etap 2)
+The overview is the first triage screen.
 
-- **Risk Radar / Ryzyka** — rule-based score (0–100) per task with reasons and
-  suggested actions, sorted by risk, badged Low/Medium/High/Critical. Critical
-  directories are configurable via `branchBoard.criticalPaths`. No AI, no network.
-- **Files & Commits / Pliki i commity** — pick a branch and see its commits
-  (`main..branch`) and changed files (`diff --name-status` + `--numstat`) with
-  add/del counts. Actions: copy file list, copy commit summary, open a file in the
-  editor.
-- **AI Review / Przegląd AI** — each task can be marked **AI-assisted** (model +
-  review checklist) in its drawer; the dashboard lists AI tasks, AI without a
-  checklist, AI with high risk, and AI ready for review.
-- **Task drawer upgrades** — the edit modal now shows a **work log** (last 5 work
-  entries: branch commits + task events) and an **overdue counter** at the **top**,
-  plus a due-date field. Branch Flow cards open their linked kanban task directly
-  in this modal, where you can add comments.
+It shows:
 
-## Implemented now (Stage 3) / Zaimplementowane (Etap 3)
+- active tasks,
+- in progress,
+- in review,
+- in testing,
+- ready to merge,
+- blocked,
+- branches without task,
+- tasks without branch,
+- done this week,
+- automatic "Needs attention" list.
 
-- **Deployments / Wdrożenia** — a DEV/staging/production model. The task drawer
-  gets **Deploy to DEV**, **Open DEV**, **Mark as tested** and (only when enabled)
-  **Deploy to PRODUCTION**. Commands come from settings with `{{branchName}}` /
-  `{{branchSlug}}` placeholders; every attempt is recorded as a `Deployment` and
-  an event. The Deployments tab shows what's on each environment: branch, task,
-  status, who, when, tested, ready-to-merge. See [DEPLOYMENTS.md](DEPLOYMENTS.md).
-- **Production safety** — production deploy is **disabled by default**
-  (`allowProductionDeploy`) and always asks for confirmation. `productionBranch`
-  is configurable; main is not assumed to be production.
-- **Safety & rollback / Bezpieczeństwo** — before merging to main the finish flow
-  can create a **backup branch** (`createBackupBranchBeforeMerge`, default on) and
-  a **safety tag** (`createSafetyTagBeforeMerge`). The drawer's Safety section adds
-  Create backup branch, Create safety tag, Copy rollback commands, Revert last
-  commit (safe, confirmed) and a Git guide link. Destructive commands are only
-  **generated and copied**, never run automatically. See
-  [ROLLBACK_SAFETY.md](ROLLBACK_SAFETY.md).
+Typical attention items:
 
-## Coming later / W kolejnych etapach
+- task stuck for several days,
+- branch has no commits,
+- branch is not pushed,
+- task has no assignee,
+- branch is not linked to a task,
+- review/testing work has no DEV deployment,
+- branch diverged heavily from main.
 
-- **Stage 4:** documentation polish, "open in browser" dashboard, i18n completion.
+### Team
 
-The data model already carries `events[]` and `deployments[]` (schema v3, with
-automatic migration of older boards), and the services are split per concern
-(`EventService`, `BranchAnalyticsService`, `DashboardService`, with
-`RiskService` / `DeploymentService` / `SafetyService` planned) so later stages
-drop in without reshaping the app.
+The team tab shows workload per board user:
 
-## Manual test checklist / Checklista testów
+- active work,
+- review,
+- testing,
+- done this week,
+- branch count,
+- last activity,
+- blocked count.
+
+This view is explicitly for bottleneck detection, not people scoring. The
+product language should keep that framing.
+
+### Branch Flow
+
+Branch Flow is the main operational panel for branch-driven work.
+
+Every row combines task data and Git data:
+
+- branch name,
+- linked task,
+- assignee,
+- column,
+- exists local/remote,
+- ahead/behind main,
+- changed files count,
+- last commit,
+- stale state,
+- risk level,
+- pipeline stages.
+
+Pipeline:
+
+```text
+Task -> Branch -> Commits -> Push -> DEV -> Review -> Testing -> Merge
+```
+
+Actions:
+
+- checkout branch,
+- push branch,
+- deploy to DEV,
+- open/create/link task,
+- copy branch or AI prompt,
+- open branch drawer,
+- bulk delete local branches.
+
+Filters include:
+
+- mine,
+- active,
+- without task,
+- not pushed,
+- local only,
+- remote only,
+- backup,
+- stale,
+- ready to review,
+- ready to merge,
+- cleanup,
+- dev.
+
+### Cleanup
+
+Cleanup focuses on branches that can clutter the repository:
+
+- stale branches,
+- local-only branches,
+- remote-only branches,
+- backup/archive candidates,
+- branches without tasks.
+
+Supported operations are explicit and confirmed:
+
+- archive local branch by creating an archive tag first,
+- delete local branch,
+- bulk delete local branches,
+- copy branch lists for manual review.
+
+Current branch and main branch are protected from bulk deletion.
+
+### Deployments
+
+Deployments shows board deployment records:
+
+- environment,
+- branch,
+- task,
+- status,
+- who deployed,
+- when deployed,
+- URL,
+- tested state,
+- ready-to-merge context.
+
+Deploy attempts are recorded even when they fail.
+
+See [DEPLOYMENTS.md](DEPLOYMENTS.md).
+
+### Files & Commits
+
+Files & Commits lets the user inspect branch-level technical change:
+
+- commits in the branch range,
+- changed files,
+- additions/deletions,
+- copy summary,
+- select a branch for detail,
+- open files or diffs through VS Code.
+
+This is useful before review and before deciding whether a branch is safe to
+merge.
+
+### Risk Radar
+
+Risk Radar is a rule-based view. It does not call AI and does not use the
+network.
+
+Signals include:
+
+- many changed files,
+- branch divergence,
+- stale branch,
+- critical path touched,
+- review/testing without DEV,
+- missing branch/task linkage,
+- no commits,
+- dirty workflow signals.
+
+Critical paths come from `branchBoard.criticalPaths`.
+
+### Impact
+
+Impact groups changed files into configured project areas such as checkout,
+auth, admin, database or SEO.
+
+It is powered by `branchBoard.impactAreas`.
+
+Use it to answer:
+
+- which business area is touched,
+- how many branches touch this area,
+- whether several tasks collide in one sensitive area.
+
+### Activity
+
+Activity shows stored board events grouped by time.
+
+Event categories:
+
+- task,
+- git,
+- deploy,
+- AI,
+- user/comment.
+
+Events are persisted in `board.events` and capped so the board data does not
+grow forever.
+
+### AI Review
+
+AI Review surfaces AI-assisted work:
+
+- AI-assisted tasks,
+- tasks without review checklist,
+- high-risk AI work,
+- AI work ready for review.
+
+This is the place for a lead to check whether AI output was reviewed as part of
+normal engineering flow.
+
+## Branch Drawer
+
+Branch Flow and related tabs can open the Branch Drawer. It shows branch detail
+without leaving the dashboard:
+
+- task link,
+- commits,
+- files,
+- changed-file diff actions,
+- push/checkout/deploy actions,
+- AI prompt actions,
+- cleanup actions,
+- delete/archive branch actions.
+
+All write actions still go through native confirmations where appropriate.
+
+## Data Sources
+
+Command Center combines:
+
+- persisted board data from `BoardService`,
+- read-only Git data from `GitService`,
+- computed branch analytics from `BranchAnalyticsService`,
+- risk scoring from `RiskService`,
+- dashboard aggregation from `DashboardService`,
+- events from `EventService`,
+- deployments stored in `BoardData.deployments`.
+
+## Safety Model
+
+Safe by default:
+
+- opening Command Center does not run Git write operations,
+- dashboards should not fetch network data automatically,
+- branch deletion requires confirmation,
+- force delete requires `allowForceDeleteBranch`,
+- production deploy requires `allowProductionDeploy`,
+- merge/finish follows [SAFETY.md](SAFETY.md).
+
+## Manual Test Checklist
 
 Command Center:
 
-- [ ] Opens from the top bar button and from `branchBoard.openCommandCenter`.
-- [ ] Overview tiles show sensible counts; "Needs attention" lists real issues.
-- [ ] Team cards render with workload bars and last activity.
-- [ ] Branch Flow lists branches with the pipeline and filters work.
-- [ ] Activity timeline groups events and category filters work.
-- [ ] Deployments / Files / Risk / AI tabs show a clear "coming soon" state.
-- [ ] Switching board language to English re-labels every Command Center string.
+- [ ] Opens from top navigation and command palette.
+- [ ] Overview metrics match board and Git state.
+- [ ] Team rows match assigned tasks.
+- [ ] Branch Flow filters work.
+- [ ] Branch drawer loads commits/files for a selected branch.
+- [ ] Cleanup protects current and main branches.
+- [ ] Deployments show recorded deploy attempts.
+- [ ] Files & Commits can open files and diffs.
+- [ ] Risk Radar updates after changing `criticalPaths`.
+- [ ] Impact updates after changing `impactAreas`.
+- [ ] Activity shows task, git, deploy and AI events.
+- [ ] AI Review shows AI-assisted tasks.
 
-Git:
+Git safety:
 
-- [ ] Current branch is marked (●) in Branch Flow.
-- [ ] Changed-files count and ahead/behind reflect the real repository.
-- [ ] Branches without a task appear under "branches without task".
-- [ ] Tasks without a branch appear under "tasks without branch".
-
-Safety:
-
-- [ ] Opening the dashboard performs no network calls (no push/pull/fetch).
-- [ ] No git write operations are triggered by viewing analytics.
+- [ ] Opening Command Center performs no push/pull/merge/delete.
+- [ ] Checkout/push/delete/archive actions require explicit clicks.
+- [ ] Deleting remote branch asks for confirmation.
+- [ ] Bulk delete skips current and main branches.

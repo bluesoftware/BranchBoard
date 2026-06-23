@@ -10,6 +10,8 @@ import { BoardService } from "./services/BoardService";
 import { GitService } from "./services/GitService";
 import { BoardPanel, BoardViewProvider, ControllerDeps } from "./panel/BoardPanel";
 import { Logger } from "./services/Logger";
+import { TitleBarService } from "./services/TitleBarService";
+import { BranchStatusBarService } from "./services/BranchStatusBarService";
 import { setLanguage, t } from "./i18n";
 
 let boardService: BoardService | undefined;
@@ -18,6 +20,7 @@ let storage: StorageProvider | undefined;
 let syncTimer: NodeJS.Timeout | undefined;
 let userTimer: NodeJS.Timeout | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
+let branchStatusBarService: BranchStatusBarService | undefined;
 
 /** Read the effective extension configuration from VS Code settings. */
 function readConfig(): BranchBoardConfig {
@@ -50,6 +53,68 @@ function readConfig(): BranchBoardConfig {
     deleteLocalBranchAfterMerge: c.get("deleteLocalBranchAfterMerge", false),
     language: (c.get<string>("language", "pl") === "en" ? "en" : "pl") as "pl" | "en",
     aiPromptTemplate: c.get("aiPromptTemplate", ""),
+    enableAIAgentColumn: c.get("enableAIAgentColumn", true),
+    aiAgentColumnId: c.get("aiAgentColumnId", "ai-agent"),
+    aiAgents: c.get("aiAgents", [
+      {
+        id: "cursor-agent",
+        name: "Cursor Agent",
+        command: "cursor-agent",
+        args: ["-p", "{{prompt}}", "--output-format", "json"],
+        enabled: true,
+        allowModels: true,
+        models: ["auto", "sonnet", "opus", "gpt-5", "gpt-5-codex"],
+      },
+      {
+        id: "claude-cli",
+        name: "Claude CLI",
+        command: "claude",
+        args: ["{{prompt}}"],
+        enabled: false,
+        allowModels: true,
+        models: ["auto", "sonnet", "opus"],
+      },
+    ]) as BranchBoardConfig["aiAgents"],
+    requireConfirmationBeforeAIAgentRun: c.get("requireConfirmationBeforeAIAgentRun", true),
+    requireCleanTreeBeforeAIAgentRun: c.get("requireCleanTreeBeforeAIAgentRun", true),
+    aiAgentTimeoutSeconds: c.get("aiAgentTimeoutSeconds", 900),
+    allowedAIAgentCommands: c.get("allowedAIAgentCommands", [
+      "cursor-agent", "claude", "node", "npm", "pnpm",
+    ]) as string[],
+    defaultAIBranchPrefix: c.get("defaultAIBranchPrefix", "ai/"),
+    moveToLocalAfterAIAgentSuccess: c.get("moveToLocalAfterAIAgentSuccess", true),
+    optimizePromptsBeforeSend: c.get("optimizePromptsBeforeSend", false),
+    promptOptimizerAgentId: c.get("promptOptimizerAgentId", ""),
+    promptOptimizerModel: c.get("promptOptimizerModel", ""),
+    promptOptimizationRules: c.get(
+      "promptOptimizationRules",
+      "PL: Dopasuj prompt technicznie do agenta docelowego — zachowaj wszystkie fakty, ścieżki plików, kryteria akceptacji i reguły bezpieczeństwa, popraw tylko strukturę, jasność i kolejność instrukcji. Nie dodawaj nowych wymagań, nie usuwaj żadnych ograniczeń.\nEN: Adapt the prompt technically for the target agent — keep every fact, file path, acceptance criterion and safety rule intact, only improve structure, clarity and instruction order. Do not add new requirements, do not drop any constraints."
+    ),
+    aiCostMode: (["auto", "cheap", "balanced", "quality", "manual"].includes(c.get("aiCostMode", "auto"))
+      ? c.get("aiCostMode", "auto")
+      : "auto") as BranchBoardConfig["aiCostMode"],
+    aiLocalOptimizer: {
+      enabled: c.get("aiLocalOptimizer.enabled", false),
+      provider: (c.get<string>("aiLocalOptimizer.provider", "local-command") === "openai-compatible-http"
+        ? "openai-compatible-http"
+        : "local-command") as BranchBoardConfig["aiLocalOptimizer"]["provider"],
+      command: c.get("aiLocalOptimizer.command", ""),
+      args: c.get("aiLocalOptimizer.args", []) as string[],
+      endpoint: c.get("aiLocalOptimizer.endpoint", ""),
+      model: c.get("aiLocalOptimizer.model", ""),
+      timeoutSec: c.get("aiLocalOptimizer.timeoutSec", 30),
+    },
+    aiCli: {
+      defaultContextLevel: (c.get<string>("aiCli.defaultContextLevel", "normal") === "small"
+        ? "small"
+        : c.get<string>("aiCli.defaultContextLevel", "normal") === "full"
+          ? "full"
+          : "normal") as BranchBoardConfig["aiCli"]["defaultContextLevel"],
+      requireConfirmForFullContext: c.get("aiCli.requireConfirmForFullContext", true),
+      maxFilesInContext: c.get("aiCli.maxFilesInContext", 12),
+      maxPromptChars: c.get("aiCli.maxPromptChars", 60000),
+      expensiveModelsRequireConfirm: c.get("aiCli.expensiveModelsRequireConfirm", true),
+    },
     criticalPaths: c.get("criticalPaths", [
       "payment", "checkout", "koszyk", "order", "auth",
       "admin", "database", "migration", "config", "security",
@@ -90,6 +155,23 @@ function readConfig(): BranchBoardConfig {
       showAvatars: c.get("appearance.showAvatars", true),
       showPriority: c.get("appearance.showPriority", true),
       reduceAnimations: c.get("appearance.reduceAnimations", false),
+    },
+    titleBar: {
+      enabled: c.get("titleBar.enabled", false),
+      preset: c.get("titleBar.preset", "default") as BranchBoardConfig["titleBar"]["preset"],
+      backgroundColor: c.get("titleBar.backgroundColor", "#1f1f1f"),
+      foregroundColor: c.get("titleBar.foregroundColor", "#cccccc"),
+      borderColor: c.get("titleBar.borderColor", "#000000"),
+      inactiveBackgroundColor: c.get("titleBar.inactiveBackgroundColor", "#181818"),
+      inactiveForegroundColor: c.get("titleBar.inactiveForegroundColor", "#6b6b6b"),
+      showBranch: c.get("titleBar.showBranch", true),
+      branchSeparator: c.get("titleBar.branchSeparator", "  ⎇ "),
+      branchButtonEnabled: c.get("titleBar.branchButtonEnabled", true),
+      branchButtonColor: c.get("titleBar.branchButtonColor", "#ffffff"),
+      branchButtonBackground: c.get(
+        "titleBar.branchButtonBackground",
+        "prominent"
+      ) as BranchBoardConfig["titleBar"]["branchButtonBackground"],
     },
     notifications: {
       enabled: c.get("notifications.enabled", true),
@@ -239,9 +321,14 @@ export async function activate(context: vscode.ExtensionContext) {
   storage = buildStorage(config, root.uri);
   boardService = new BoardService(storage);
   gitService = new GitService(root.uri.fsPath, readConfig);
+  void TitleBarService.apply(config.titleBar);
+  branchStatusBarService = new BranchStatusBarService(gitService);
+  branchStatusBarService.apply(config.titleBar);
+  context.subscriptions.push(branchStatusBarService);
 
   try {
     await boardService.init();
+    await boardService.ensureAIAgentColumn(config.enableAIAgentColumn, config.aiAgentColumnId);
     await syncConfiguredAnnouncement(config);
     Logger.info(`Board loaded from ${storage.kind} storage.`);
   } catch (err: any) {
@@ -367,7 +454,12 @@ export async function activate(context: vscode.ExtensionContext) {
         setLanguage(newCfg.language);
         startSyncTimer(newCfg.syncIntervalSeconds);
         startUserSyncTimer(newCfg.syncUsersIntervalHours);
+        void boardService?.ensureAIAgentColumn(newCfg.enableAIAgentColumn, newCfg.aiAgentColumnId);
         void syncConfiguredAnnouncement(newCfg);
+        if (e.affectsConfiguration("branchBoard.titleBar")) {
+          void TitleBarService.apply(newCfg.titleBar);
+          branchStatusBarService?.apply(newCfg.titleBar);
+        }
       }
     })
   );

@@ -1,40 +1,122 @@
-# Rollback & Git safety
+# Rollback And Git Safety
 
-BranchBoard's guiding rule: **non-destructive by default**. It will happily
-create safety nets for you, but it will never rewrite history or throw away work
-automatically. Anything destructive is generated as commands for you to review
-and run yourself.
+BranchBoard is non-destructive by default. It can create safety nets and prepare
+rollback commands, but it should not silently rewrite history or throw away work.
 
-## Safety nets before merge
+## Safety Nets Before Merge
 
-When the finish flow merges a task branch into main, it can first create:
+The finish flow can create:
 
-- a **backup branch** `backup/<branch>-<timestamp>`
-  (`branchBoard.createBackupBranchBeforeMerge`, default **on**), and/or
-- a **safety tag** `before-merge-<taskId>-<timestamp>` at the main tip
-  (`branchBoard.createSafetyTagBeforeMerge`, default **off**).
+- backup branch: `backup/<branch>-<timestamp>`,
+- safety tag: `before-merge-<taskId>-<timestamp>`.
 
-Both are plain pointers to existing commits — they change nothing in your tree,
-and they give you a guaranteed way back if a merge goes wrong.
+Settings:
 
-## Manual safety actions (task drawer → Safety)
+```jsonc
+{
+  "branchBoard.createBackupBranchBeforeMerge": true,
+  "branchBoard.createSafetyTagBeforeMerge": false
+}
+```
 
-- **Create backup branch** — snapshot the current branch without checking it out.
-- **Create safety tag** — tag the main tip.
-- **Copy rollback commands** — copies a reviewed list of commands (safe undo,
-  history inspection, and clearly-marked DANGER commands) to your clipboard.
-- **Revert last commit** — the safe undo: runs `git revert --no-edit HEAD`, which
-  creates a new commit. It requires a clean working tree and asks for
-  confirmation. A conflicted revert is aborted automatically so your tree stays
-  clean.
-- **Git guide** — opens the official `git revert` documentation.
+Backup branches and safety tags are plain Git refs. They do not change the
+working tree and do not remove commits.
 
-## What BranchBoard will never do automatically
+## Manual Safety Actions
 
-- `git reset --hard` (or any history rewrite)
-- delete a branch after a failed merge
-- mark a task done if a git operation failed
-- deploy to production without an explicit opt-in and confirmation
+Available from task drawer / Current Branch safety areas:
 
-If you need a destructive operation, copy the rollback commands, read them, and
-run the one you actually want.
+- create backup branch,
+- create safety tag,
+- copy rollback commands,
+- revert last commit,
+- revert from origin,
+- resume branch after production rollback where supported.
+
+## Revert Last Commit
+
+This is the safe undo:
+
+```bash
+git revert --no-edit HEAD
+```
+
+It creates a new commit instead of rewriting history.
+
+BranchBoard requires a clean working tree and asks for confirmation. If revert
+conflicts, BranchBoard attempts to abort so the tree stays clean.
+
+## Revert From Origin
+
+This is used when local work needs to be brought back to the remote-tracking
+state. It is guarded and should be used only after reading the operation detail.
+
+For destructive reset-style recovery, BranchBoard prefers copying commands for
+manual review rather than running them automatically.
+
+## Archive Instead Of Delete
+
+Archive creates:
+
+```text
+archive/<branch>-<timestamp>
+```
+
+then removes the local branch. This preserves a reference to the commits so a
+developer can recover the branch later.
+
+## Copied Rollback Commands
+
+Generated command blocks include:
+
+- safe revert,
+- `git log`,
+- `git reflog`,
+- restore from backup branch,
+- clearly marked dangerous examples such as `git reset --hard`,
+- merge revert examples for main.
+
+Dangerous commands are commented out in the generated text.
+
+## What BranchBoard Will Not Do Automatically
+
+- `git reset --hard`,
+- force push,
+- delete a branch after failed merge,
+- delete remote branch without confirmation,
+- force-delete local branch by default,
+- mark task done after failed Git operation,
+- deploy to production without explicit opt-in and confirmation.
+
+## Recovery Checklist
+
+If production/main got a bad merge:
+
+1. Stop new merges.
+2. Inspect main:
+
+   ```bash
+   git checkout main
+   git status
+   git log --oneline -n 20
+   ```
+
+3. Prefer revert over reset:
+
+   ```bash
+   git revert --no-edit -m 1 <merge-commit>
+   ```
+
+4. Push only after review:
+
+   ```bash
+   git push origin main
+   ```
+
+5. Reopen or recreate the task branch if more work is needed.
+
+## Related Docs
+
+- [SAFETY.md](SAFETY.md)
+- [WORKFLOW.md](WORKFLOW.md)
+- [BRANCH_FLOW.md](BRANCH_FLOW.md)

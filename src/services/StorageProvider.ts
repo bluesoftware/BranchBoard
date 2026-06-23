@@ -85,10 +85,19 @@ export const GIT_FLOW_COLUMNS_PL: BoardData["columns"] = [
   { id: "backlog", name: "BACKLOG", nameEn: "Backlog", position: 1, gitStage: "none" },
   { id: "todo", name: "DO ZROBIENIA", nameEn: "To Do", position: 2, gitStage: "none" },
   {
+    id: "ai-agent",
+    name: "AI AGENT",
+    nameEn: "AI Agent",
+    position: 3,
+    gitStage: "ai-agent",
+    branchPrefix: "ai/",
+    wipLimit: 3,
+  },
+  {
     id: "in-progress",
     name: "W TRAKCIE",
     nameEn: "In Progress",
-    position: 3,
+    position: 4,
     gitStage: "feature",
     baseBranch: "dev",
     branchPrefix: "feature/",
@@ -101,7 +110,7 @@ export const GIT_FLOW_COLUMNS_PL: BoardData["columns"] = [
     id: "review",
     name: "CODE REVIEW",
     nameEn: "Code Review",
-    position: 4,
+    position: 5,
     gitStage: "review",
     targetBranch: "dev",
     onEnter: [
@@ -112,7 +121,7 @@ export const GIT_FLOW_COLUMNS_PL: BoardData["columns"] = [
     id: "testing",
     name: "DO TESTU",
     nameEn: "Testing",
-    position: 5,
+    position: 6,
     gitStage: "staging",
     targetBranch: "dev",
     onEnter: [
@@ -139,7 +148,7 @@ export const GIT_FLOW_COLUMNS_EN: BoardData["columns"] = GIT_FLOW_COLUMNS_PL.map
 }));
 
 /** Current on-disk board schema version. Bumped when the shape changes. */
-export const BOARD_SCHEMA_VERSION = 4;
+export const BOARD_SCHEMA_VERSION = 5;
 
 /** Hard cap on stored events so board.json never grows unbounded. */
 export const MAX_STORED_EVENTS = 300;

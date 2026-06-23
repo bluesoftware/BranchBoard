@@ -11,7 +11,7 @@ interface Props {
   onSave: (id: string, patch: Partial<BoardColumn>) => void;
 }
 
-const GIT_STAGES: GitStage[] = ["none", "feature", "review", "staging", "production"];
+const GIT_STAGES: GitStage[] = ["none", "ai-agent", "feature", "review", "staging", "production"];
 
 function newHook(): ColumnHook {
   return {

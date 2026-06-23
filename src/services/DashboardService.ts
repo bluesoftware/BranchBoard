@@ -24,6 +24,7 @@ import { RiskService } from "./RiskService";
 type ColumnBucket =
   | "backlog"
   | "todo"
+  | "ai-agent"
   | "in-progress"
   | "review"
   | "testing"
@@ -62,6 +63,9 @@ export class DashboardService {
     }
     if (/review|przegl|do.?zatwierdz|code.?review/.test(hay)) {
       return "review";
+    }
+    if (col.gitStage === "ai-agent" || /ai.?agent/.test(hay)) {
+      return "ai-agent";
     }
     if (/in.?progress|w.?toku|w.?trakcie|doing|robocz/.test(hay)) {
       return "in-progress";
@@ -113,6 +117,9 @@ export class DashboardService {
     }
     if ((bucket === "review" || bucket === "testing") && !info.deployedToDev) {
       score += 15;
+    }
+    if (bucket === "ai-agent") {
+      score += 10;
     }
     if (info.commitsAheadMain > 0 && !info.existsRemote) {
       score += 10;
@@ -258,6 +265,9 @@ export class DashboardService {
       if (bucket === "in-progress") {
         overview.inProgress++;
       }
+      if (bucket === "ai-agent") {
+        overview.inProgress++;
+      }
       if (bucket === "review") {
         overview.inReview++;
       }
@@ -341,7 +351,7 @@ export class DashboardService {
           continue;
         }
         stats.active++;
-        if (bucket === "review") {
+        if (bucket === "review" || bucket === "ai-agent") {
           stats.inReview++;
         }
         if (bucket === "testing") {
@@ -431,6 +441,45 @@ export class DashboardService {
           severity: "medium",
           taskId: task.id,
           branchName: branch.branchName,
+        });
+      }
+      if (task.aiAgents?.status === "failed") {
+        attention.push({
+          id: `aifailed_${task.id}`,
+          reasonKey: "cc.attn.aiFailed",
+          params: { title: task.title },
+          severity: "high",
+          taskId: task.id,
+          branchName: task.branchName || task.aiAgents.createdBranch || null,
+        });
+      }
+      if (task.aiAgents?.status === "finished" && !task.aiAgents.reviewResult) {
+        attention.push({
+          id: `ainoreview_${task.id}`,
+          reasonKey: "cc.attn.aiFinishedNoReview",
+          params: { title: task.title },
+          severity: "medium",
+          taskId: task.id,
+          branchName: task.branchName || task.aiAgents.createdBranch || null,
+        });
+      }
+      if ((task.aiAgents?.changedFiles?.length ?? 0) > 0 && !task.branchName && !task.aiAgents?.createdBranch) {
+        attention.push({
+          id: `aifilesnobranch_${task.id}`,
+          reasonKey: "cc.attn.aiChangedFilesNoBranch",
+          params: { title: task.title },
+          severity: "high",
+          taskId: task.id,
+        });
+      }
+      if (bucket === "ai-agent" && DashboardService.olderThanDays(task.updatedAt, 1)) {
+        attention.push({
+          id: `aistuck_${task.id}`,
+          reasonKey: "cc.attn.aiStuck",
+          params: { title: task.title },
+          severity: "medium",
+          taskId: task.id,
+          branchName: task.branchName || task.aiAgents?.createdBranch || null,
         });
       }
     }

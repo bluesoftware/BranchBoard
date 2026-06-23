@@ -1,6 +1,5 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { createPortal } from "react-dom";
 import {
   AppConfig,
   BoardData,
@@ -9,23 +8,32 @@ import {
   ChecklistItem,
   CommitFile,
   CommitInfo,
+  CursorSubAgentInfo,
   FileMentionEntry,
   GitInfo,
   TaskAI,
+  TaskAIAgents,
+  AIAgentLogPayload,
+  AIAgentRunKind,
   TaskBranchStatePayload,
   TaskPriority,
   TaskVerificationResultPayload,
   TaskType,
   TASK_TYPES,
+  AiCostDecisionPayload,
+  AiCostDecisionRequestPayload,
 } from "../types";
 import { t } from "../i18n";
-import { buildAiPrompt, formatDate, slugify, suggestBranchName } from "../utils";
+import { formatDate, slugify, suggestBranchName } from "../utils";
 import { guardTaskMove, hasIncompleteSubtasks, isProductionColumn, isTaskInProduction } from "../productionGuards";
-import { CheckoutIcon, CopyIcon, RefreshIcon, SparkleIcon } from "./Icons";
+import { CheckoutIcon, CopyIcon, RefreshIcon } from "./Icons";
 import { WorkLog } from "./task/WorkLog";
 import { Checklist } from "./task/Checklist";
 import { Comments } from "./task/Comments";
 import { FileMentionInput } from "./task/FileMentionInput";
+import { AI_STATUS_TONE } from "./task/AiAgentPanel";
+import { AiAgentChatPanel } from "./task/aiChat/AiAgentChatPanel";
+import { Help, LabelHelp } from "./common/Help";
 
 const RichDescription = lazy(() =>
   import("./task/RichDescription").then((module) => ({ default: module.RichDescription }))
@@ -43,6 +51,21 @@ interface Props {
   verificationResult: TaskVerificationResultPayload | null;
   verificationRunning: boolean;
   onRunVerification: () => void;
+  onGenerateAIAgentPrompt: () => void;
+  onRunAIAgentPlan: () => void;
+  onRunAIAgent: () => void;
+  onRunAIAgentReview: () => void;
+  onAcceptAIAgentResult: () => void;
+  onRejectAIAgentResult: () => void;
+  onCancelAIAgent: () => void;
+  /** Live stdout/stderr chunks for the current/last run of THIS task, streamed from the extension. Empty when nothing has run yet this session. */
+  aiAgentLog: AIAgentLogPayload[];
+  /** Which kind of run is currently in flight for this task, or null if idle — the authoritative "agent busy" signal (see App.tsx). */
+  aiAgentRunningKind: AIAgentRunKind | null;
+  /** Latest AI Cost Guard decision for this task's chat, or null until the first message is sent. */
+  aiCostDecision: AiCostDecisionPayload | null;
+  /** Asks the extension to (re)compute the cost-guard decision — e.g. on a new chat message, "reduce context", or "confirm and run". */
+  onRequestAiCostDecision: (req: Omit<AiCostDecisionRequestPayload, "taskId">) => void;
   events: BoardEvent[];
   branchCommits: CommitInfo[];
   branchFiles: CommitFile[];
@@ -72,6 +95,8 @@ interface Props {
   onOpenDiff: (path: string) => void;
   fileSuggestions: FileMentionEntry[];
   onSearchFiles: (query: string) => void;
+  cursorAgents: CursorSubAgentInfo[];
+  onRefreshCursorAgents: () => void;
 }
 
 const FILE_STATUS_TONE: Record<string, string> = {
@@ -82,107 +107,7 @@ const FILE_STATUS_TONE: Record<string, string> = {
   C: "tone-info",
 };
 
-const DEFAULT_AI_CHECKLIST_KEYS = [
-  "cc.ai.cl.scopeOnly",
-  "cc.ai.cl.noUnrelated",
-  "cc.ai.cl.style",
-  "cc.ai.cl.errors",
-  "cc.ai.cl.secrets",
-  "cc.ai.cl.tested",
-  "cc.ai.cl.safeDev",
-];
-
 const PRIORITIES: TaskPriority[] = ["none", "low", "medium", "high", "urgent"];
-
-/**
- * Small hoverable/focusable "?" with a bilingual explanation. Uses a custom
- * popover (not the native title attribute, which VS Code webviews often
- * suppress) so the tooltip reliably appears on hover and keyboard focus.
- */
-function Help({ text }: { text: string }) {
-  const anchorRef = useRef<HTMLSpanElement>(null);
-  const popRef = useRef<HTMLSpanElement>(null);
-  const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
-
-  const updatePosition = () => {
-    const rect = anchorRef.current?.getBoundingClientRect();
-    if (!rect) {
-      return;
-    }
-    const margin = 12;
-    const gap = 8;
-    const width = popRef.current?.offsetWidth ?? 320;
-    const height = popRef.current?.offsetHeight ?? 44;
-    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
-    const left = Math.min(Math.max(rect.left, margin), maxLeft);
-    const preferredTop = rect.bottom + gap;
-    const flippedTop = rect.top - height - gap;
-    const top =
-      preferredTop + height + margin <= window.innerHeight
-        ? preferredTop
-        : Math.max(margin, flippedTop);
-    setPosition({ top, left });
-  };
-
-  const show = () => {
-    updatePosition();
-    setOpen(true);
-  };
-
-  const hide = () => setOpen(false);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const onMove = () => updatePosition();
-    window.addEventListener("resize", onMove);
-    window.addEventListener("scroll", onMove, true);
-    return () => {
-      window.removeEventListener("resize", onMove);
-      window.removeEventListener("scroll", onMove, true);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (open) {
-      updatePosition();
-    }
-  }, [open, text]);
-
-  return (
-    <span
-      ref={anchorRef}
-      className="bb-help"
-      tabIndex={0}
-      aria-label={text}
-      onMouseEnter={show}
-      onMouseLeave={hide}
-      onFocus={show}
-      onBlur={hide}
-    >
-      ?
-      {open &&
-        createPortal(
-          <span ref={popRef} className="bb-help-pop bb-help-pop-floating" role="tooltip" style={position}>
-            {text}
-          </span>,
-          document.body
-        )}
-    </span>
-  );
-}
-
-/** Field label with an inline help marker. */
-function LabelHelp({ label, help }: { label: string; help: string }) {
-  return (
-    <label className="bb-label-help">
-      {label}
-      <Help text={help} />
-    </label>
-  );
-}
 
 function PropertyRow({
   label,
@@ -249,10 +174,24 @@ export function TaskDrawer(props: Props) {
   const [aiNotesDraft, setAiNotesDraft] = useState(task.ai?.aiNotes ?? "");
   const editorFallback = <div className="bb-muted small">{t("app.loading")}</div>;
 
+  // Guards against the periodic board poll (boardData refresh) clobbering
+  // in-progress edits: while a field is focused (or has unsaved local
+  // changes) we must not let an incoming `task` prop reset its local state,
+  // otherwise the user's keystrokes silently revert on blur.
+  const titleFieldRef = useRef({ focused: false, dirty: false });
+  const branchFieldRef = useRef({ focused: false, dirty: false });
+  const aiNotesFieldRef = useRef({ focused: false, dirty: false });
+
   useEffect(() => {
-    setTitle(task.title);
-    setBranchName(task.branchName);
-    setAiNotesDraft(task.ai?.aiNotes ?? "");
+    if (!titleFieldRef.current.focused && !titleFieldRef.current.dirty) {
+      setTitle(task.title);
+    }
+    if (!branchFieldRef.current.focused && !branchFieldRef.current.dirty) {
+      setBranchName(task.branchName);
+    }
+    if (!aiNotesFieldRef.current.focused && !aiNotesFieldRef.current.dirty) {
+      setAiNotesDraft(task.ai?.aiNotes ?? "");
+    }
     setShowAiNotesInput(false);
   }, [task.id, task.title, task.branchName, task.ai?.aiNotes]);
 
@@ -277,36 +216,17 @@ export function TaskDrawer(props: Props) {
     reviewChecklist: [],
   };
   const saveAi = (patch: Partial<TaskAI>) => props.onSave({ ai: { ...ai, ...patch } });
-  const addAiChecklist = () =>
-    saveAi({
-      reviewChecklist: DEFAULT_AI_CHECKLIST_KEYS.map((k, i) => ({
-        id: `aic_${Date.now().toString(36)}_${i}`,
-        text: t(k),
-        done: false,
-      })),
-    });
-  const toggleAiItem = (id: string) =>
-    saveAi({
-      reviewChecklist: ai.reviewChecklist.map((c) => (c.id === id ? { ...c, done: !c.done } : c)),
-    });
-
+  // Minimal derivation kept here only for the collapsible section's badge and
+  // default-open state — all of the agent/model/persona logic now lives in
+  // the shared <AiAgentPanel>, which derives its own full TaskAIAgents object.
+  const aiAgentsSummary: Pick<TaskAIAgents, "enabled" | "status"> = task.aiAgents ?? {
+    enabled: false,
+    status: "not_configured",
+  };
   const suggested = suggestBranchName(task);
   const assignee = board.users.find((u) => u.id === task.assignedUserId) ?? null;
   const gitEnabled = !!git?.isRepo;
   const onTaskBranch = !!git?.currentBranch && git.currentBranch === branchName;
-
-  const copyAiPrompt = () => {
-    const text = buildAiPrompt({
-      task,
-      projectName: appConfig.projectName,
-      testCommand: appConfig.policy.runCommandBeforeFinish,
-      users: board.users,
-      template: appConfig.aiPromptTemplate,
-      language: appConfig.language,
-    });
-    props.onCopyClipboard(text, t("toast.aiPromptCopied"));
-    props.onAiPromptCopied();
-  };
 
   // "Podsumuj zmiany" — builds a ready-to-paste prompt from the real diff
   // (changed files + commits) against the rules, for a quick AI-assisted
@@ -420,6 +340,9 @@ export function TaskDrawer(props: Props) {
       saveField({ columnId });
     }
   };
+  const aiAgentColumnId =
+    board.columns.find((column) => column.id === appConfig.policy.aiAgentColumnId || column.gitStage === "ai-agent")
+      ?.id ?? "";
 
   return (
     <div className="bb-task-modal-overlay" onMouseDown={props.onClose}>
@@ -531,8 +454,18 @@ export function TaskDrawer(props: Props) {
                   className="bb-ai-notes-textarea"
                   value={aiNotesDraft}
                   placeholder={t("task.branchBadge.aiNotesPlaceholder")}
-                  onChange={(e) => setAiNotesDraft(e.target.value)}
-                  onBlur={saveAiNotes}
+                  onChange={(e) => {
+                    aiNotesFieldRef.current.dirty = true;
+                    setAiNotesDraft(e.target.value);
+                  }}
+                  onFocus={() => {
+                    aiNotesFieldRef.current.focused = true;
+                  }}
+                  onBlur={() => {
+                    aiNotesFieldRef.current.focused = false;
+                    aiNotesFieldRef.current.dirty = false;
+                    saveAiNotes();
+                  }}
                   rows={5}
                 />
               </div>
@@ -557,8 +490,18 @@ export function TaskDrawer(props: Props) {
                   title={t("task.help.title")}
                   fileSuggestions={props.fileSuggestions}
                   onSearchFiles={props.onSearchFiles}
-                  onChange={setTitle}
-                  onBlur={saveTitle}
+                  onChange={(value) => {
+                    titleFieldRef.current.dirty = true;
+                    setTitle(value);
+                  }}
+                  onFocus={() => {
+                    titleFieldRef.current.focused = true;
+                  }}
+                  onBlur={() => {
+                    titleFieldRef.current.focused = false;
+                    titleFieldRef.current.dirty = false;
+                    saveTitle();
+                  }}
                 />
                 <Suspense fallback={editorFallback}>
                   <RichDescription
@@ -595,6 +538,42 @@ export function TaskDrawer(props: Props) {
               />
 
               <TaskSection
+                title={t("aiAgent.title")}
+                help={t("tooltips.aiAgent.main")}
+                defaultOpen={aiAgentsSummary.enabled || task.columnId === aiAgentColumnId}
+                right={
+                  <span className={`bb-badge ${AI_STATUS_TONE[aiAgentsSummary.status] ?? "tone-neutral"}`}>
+                    {t(`aiAgent.status.${aiAgentsSummary.status}`)}
+                  </span>
+                }
+              >
+                <AiAgentChatPanel
+                  task={task}
+                  board={board}
+                  appConfig={appConfig}
+                  cursorAgents={props.cursorAgents}
+                  aiAgentLog={props.aiAgentLog}
+                  aiAgentRunningKind={props.aiAgentRunningKind}
+                  aiCostDecision={props.aiCostDecision}
+                  onRequestAiCostDecision={props.onRequestAiCostDecision}
+                  onSave={props.onSave}
+                  onGenerateAIAgentPrompt={props.onGenerateAIAgentPrompt}
+                  onRunAIAgentPlan={props.onRunAIAgentPlan}
+                  onRunAIAgent={props.onRunAIAgent}
+                  onRunAIAgentReview={props.onRunAIAgentReview}
+                  onAcceptAIAgentResult={props.onAcceptAIAgentResult}
+                  onRejectAIAgentResult={props.onRejectAIAgentResult}
+                  onCancelAIAgent={props.onCancelAIAgent}
+                  onCopyClipboard={props.onCopyClipboard}
+                  onAiPromptCopied={props.onAiPromptCopied}
+                  onCheckoutBranch={props.onCheckoutBranch}
+                  onOpenFile={props.onOpenFile}
+                  onRefreshCursorAgents={props.onRefreshCursorAgents}
+                  git={git}
+                />
+              </TaskSection>
+
+              <TaskSection
                 title="Zaawansowane / techniczne"
                 help={t("task.help.git")}
                 right={
@@ -619,8 +598,18 @@ export function TaskDrawer(props: Props) {
                   className="bb-input"
                   value={branchName}
                   placeholder={suggested}
-                  onChange={(e) => setBranchName(e.target.value)}
-                  onBlur={() => saveBranch(branchName)}
+                  onChange={(e) => {
+                    branchFieldRef.current.dirty = true;
+                    setBranchName(e.target.value);
+                  }}
+                  onFocus={() => {
+                    branchFieldRef.current.focused = true;
+                  }}
+                  onBlur={() => {
+                    branchFieldRef.current.focused = false;
+                    branchFieldRef.current.dirty = false;
+                    saveBranch(branchName);
+                  }}
                 />
                 {!branchName && (
                   <button
@@ -884,64 +873,6 @@ export function TaskDrawer(props: Props) {
             <span className="bb-muted small">{t("task.safety.note")}</span>
           </TaskSection>
 
-          {/* 7 ── AI */}
-          <TaskSection title="AI" help={t("task.help.ai")} right={ai.createdByAi ? <span className="bb-count">ON</span> : null}>
-            <button className="bb-btn accent" onClick={copyAiPrompt} title={t("task.copyAiPromptHint")}>
-              <SparkleIcon size={13} />
-              {t("task.copyAiPrompt")}
-            </button>
-            <span className="bb-muted small">{t("task.copyAiPromptHint")}</span>
-
-            <label className="bb-ai-toggle" title={t("task.help.aiAssisted")}>
-              <input
-                type="checkbox"
-                checked={ai.createdByAi}
-                onChange={(e) => saveAi({ createdByAi: e.target.checked })}
-              />
-              {t("task.aiAssisted")}
-            </label>
-
-            {ai.createdByAi && (
-              <>
-                <div className="bb-field">
-                  <LabelHelp label={t("task.aiModel")} help={t("task.help.aiModel")} />
-                  <input
-                    className="bb-input"
-                    value={ai.usedModel}
-                    placeholder={t("task.aiModelPlaceholder")}
-                    onChange={(e) => saveAi({ usedModel: e.target.value })}
-                  />
-                </div>
-
-                <div className="bb-section-subtitle">
-                  {t("task.aiChecklist")}{" "}
-                  {ai.reviewChecklist.length > 0
-                    ? `(${ai.reviewChecklist.filter((c) => c.done).length}/${ai.reviewChecklist.length})`
-                    : ""}
-                </div>
-                {ai.reviewChecklist.length === 0 ? (
-                  <button className="bb-btn" onClick={addAiChecklist} title={t("task.help.aiChecklist")}>
-                    {t("task.aiAddChecklist")}
-                  </button>
-                ) : (
-                  <div className="bb-checklist">
-                    {ai.reviewChecklist.map((c) => (
-                      <div key={c.id} className="bb-check-item">
-                        <button
-                          className={`bb-check square ${c.done ? "checked" : ""}`}
-                          onClick={() => toggleAiItem(c.id)}
-                        >
-                          {c.done ? "✓" : ""}
-                        </button>
-                        <span className={`bb-check-text ${c.done ? "done" : ""}`}>{c.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </TaskSection>
-
           <TaskSection title={t("task.context")} help={t("task.help.context")}>
             <WorkLog task={task} events={props.events} branchCommits={props.branchCommits} users={board.users} />
           </TaskSection>
@@ -958,6 +889,52 @@ export function TaskDrawer(props: Props) {
                   <span aria-hidden="true">#</span>
                   {projectLabel} / {columnLabel}
                 </span>
+              </PropertyRow>
+
+              <PropertyRow label={t("task.gitBranch")} help={t("task.help.branch")}>
+                <div className="bb-task-branch-property">
+                  <input
+                    className="bb-task-property-control mono"
+                    value={branchName}
+                    placeholder="Dodaj branch"
+                    onChange={(e) => {
+                      branchFieldRef.current.dirty = true;
+                      setBranchName(e.target.value);
+                    }}
+                    onFocus={() => {
+                      branchFieldRef.current.focused = true;
+                    }}
+                    onBlur={() => {
+                      branchFieldRef.current.focused = false;
+                      branchFieldRef.current.dirty = false;
+                      saveBranch(branchName);
+                    }}
+                  />
+                  {branchName ? (
+                    <button
+                      type="button"
+                      className="bb-task-property-action"
+                      title={t("task.tip.checkoutPublic", { remote: policy.remoteName })}
+                      disabled={!gitEnabled}
+                      onClick={checkoutBranch}
+                    >
+                      <CheckoutIcon size={14} />
+                      <span>{t("task.checkoutShort")}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="bb-task-property-plus"
+                      title={t("task.help.suggest")}
+                      onClick={() => {
+                        setBranchName(suggested);
+                        saveBranch(suggested);
+                      }}
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
               </PropertyRow>
 
               <PropertyRow label={t("task.assignee")} help={t("task.help.assignee")}>
@@ -1044,42 +1021,6 @@ export function TaskDrawer(props: Props) {
                     </option>
                   ))}
                 </select>
-              </PropertyRow>
-
-              <PropertyRow label={t("task.gitBranch")} help={t("task.help.branch")}>
-                <div className="bb-task-branch-property">
-                  <input
-                    className="bb-task-property-control mono"
-                    value={branchName}
-                    placeholder="Dodaj branch"
-                    onChange={(e) => setBranchName(e.target.value)}
-                    onBlur={() => saveBranch(branchName)}
-                  />
-                  {branchName ? (
-                    <button
-                      type="button"
-                      className="bb-task-property-action"
-                      title={t("task.tip.checkoutPublic", { remote: policy.remoteName })}
-                      disabled={!gitEnabled}
-                      onClick={checkoutBranch}
-                    >
-                      <CheckoutIcon size={14} />
-                      <span>{t("task.checkoutShort")}</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="bb-task-property-plus"
-                      title={t("task.help.suggest")}
-                      onClick={() => {
-                        setBranchName(suggested);
-                        saveBranch(suggested);
-                      }}
-                    >
-                      +
-                    </button>
-                  )}
-                </div>
               </PropertyRow>
 
             </div>

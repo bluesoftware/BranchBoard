@@ -57,6 +57,9 @@ export function describeColumnAutomation(
         column.branchPrefix || policy.defaultBranchPrefix || "feature/"
       );
       break;
+    case "ai-agent":
+      description = t("columnConfig.automation.aiAgent");
+      break;
     case "review":
       description = t("columnConfig.automation.review").replace("{remote}", remote);
       break;

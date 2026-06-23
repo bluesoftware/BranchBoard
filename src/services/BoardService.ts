@@ -33,6 +33,19 @@ export class BoardService {
    *  machine than the one that performed the action) — see applyExternal(). */
   private externalRecordListeners: Array<(record: BoardNotificationRecord) => void> = [];
   private disposeExternal: (() => void) | undefined;
+  /**
+   * Bumped every time a local edit is applied to `this.board` (see `persist()`).
+   * `refreshFromStorage()` snapshots this before its (possibly slow, e.g.
+   * SSH+sqlite) `storage.load()` call and re-checks it afterwards: if it
+   * changed in the meantime, a local edit landed WHILE the read was in
+   * flight, so the read's result is stale relative to memory and must be
+   * dropped instead of overwriting the edit the user just made. Without this,
+   * a poll that started just before a save (so the existing `inFlightSave`
+   * guard — checked only at the start — saw nothing to wait for) could
+   * resolve after the save finished and clobber it, e.g. silently un-checking
+   * a just-selected Cursor persona the moment the next sync tick lands.
+   */
+  private saveGeneration = 0;
 
   constructor(private storage: StorageProvider) {}
 
@@ -56,6 +69,32 @@ export class BoardService {
       linkLabel: a.linkLabel ?? "",
       readBy: Array.isArray(a.readBy) ? a.readBy : [],
       active: a.active ?? true,
+    }));
+    board.tasks = (Array.isArray(board.tasks) ? board.tasks : []).map((task) => ({
+      ...task,
+      comments: Array.isArray(task.comments) ? task.comments : [],
+      checklist: Array.isArray(task.checklist) ? task.checklist : [],
+      aiAgents: task.aiAgents
+        ? {
+            enabled: !!task.aiAgents.enabled,
+            status: task.aiAgents.status ?? "not_configured",
+            selectedAgentIds: Array.isArray(task.aiAgents.selectedAgentIds)
+              ? task.aiAgents.selectedAgentIds
+              : [],
+            selectedModel: task.aiAgents.selectedModel ?? "",
+            prompt: task.aiAgents.prompt ?? "",
+            plan: task.aiAgents.plan ?? "",
+            planFile: task.aiAgents.planFile ?? "",
+            result: task.aiAgents.result ?? "",
+            reviewResult: task.aiAgents.reviewResult ?? "",
+            lastRunAt: task.aiAgents.lastRunAt,
+            lastFinishedAt: task.aiAgents.lastFinishedAt,
+            error: task.aiAgents.error ?? "",
+            createdBranch: task.aiAgents.createdBranch ?? "",
+            changedFiles: Array.isArray(task.aiAgents.changedFiles) ? task.aiAgents.changedFiles : [],
+            runHistory: Array.isArray(task.aiAgents.runHistory) ? task.aiAgents.runHistory : [],
+          }
+        : undefined,
     }));
     return board;
   }
@@ -145,6 +184,16 @@ export class BoardService {
     }
   }
 
+  // Tracks the save currently in flight (if any) so refreshFromStorage()
+  // can wait for it instead of reading the remote store mid-write. Without
+  // this, a periodic poll (e.g. SSH+sqlite, which can take several seconds
+  // round trip) can read storage AFTER an edit was emitted optimistically
+  // but BEFORE the write actually landed, see the pre-edit data, and shove
+  // it back into the in-memory board — visibly reverting whatever the user
+  // just typed (title/description/branch/etc.) the moment that poll's
+  // boardData message reaches the webview.
+  private inFlightSave: Promise<void> | null = null;
+
   private async persist() {
     if (!this.board) {
       return;
@@ -157,13 +206,23 @@ export class BoardService {
     // Now the UI updates right away and the slow write happens in the
     // background — if it fails, recoverFromFailedSave() reloads the
     // authoritative board so the UI never drifts from what's actually saved.
+    this.saveGeneration++;
     this.emitBoard();
-    try {
-      await this.storage.save(this.board);
-    } catch (err) {
-      await this.recoverFromFailedSave();
-      throw err;
-    }
+    const board = this.board;
+    const savePromise = (async () => {
+      try {
+        await this.storage.save(board);
+      } catch (err) {
+        await this.recoverFromFailedSave();
+        throw err;
+      }
+    })();
+    this.inFlightSave = savePromise.finally(() => {
+      if (this.inFlightSave === savePromise) {
+        this.inFlightSave = null;
+      }
+    });
+    await savePromise;
   }
 
   /**
@@ -752,6 +811,94 @@ export class BoardService {
     await this.persist();
   }
 
+  /**
+   * Add/update the system AI AGENT column for existing boards. It is inserted
+   * before the first local/feature work column without renaming existing IDs.
+   */
+  async ensureAIAgentColumn(enabled: boolean, columnId = "ai-agent"): Promise<void> {
+    const board = this.getBoard();
+
+    if (!enabled) {
+      const existingDisabled = board.columns.find(
+        (c) => c.id === columnId || c.gitStage === "ai-agent" || /ai.?agent/i.test(`${c.id} ${c.name}`)
+      );
+      if (!existingDisabled) {
+        return;
+      }
+      const fallback =
+        [...board.columns]
+          .filter((c) => c.id !== existingDisabled.id)
+          .sort((a, b) => a.position - b.position)[0] ?? null;
+      if (fallback) {
+        for (const task of board.tasks) {
+          if (task.columnId === existingDisabled.id) {
+            task.columnId = fallback.id;
+            task.updatedAt = new Date().toISOString();
+          }
+        }
+      }
+      board.columns = board.columns.filter((c) => c.id !== existingDisabled.id);
+      board.columns.sort((a, b) => a.position - b.position);
+      await this.persist();
+      return;
+    }
+
+    const existing = board.columns.find((c) => c.id === columnId);
+    const sorted = [...board.columns].sort((a, b) => a.position - b.position);
+    const localColumn =
+      sorted.find((c) => /(^|\s)local(\s|$)|w.?trakcie|in.?progress/i.test(`${c.id} ${c.name} ${c.nameEn ?? ""}`)) ??
+      sorted.find((c) => c.gitStage === "feature") ??
+      sorted.find((c) => /origin|push|review|test|dev|prod|zrobione|done/i.test(`${c.id} ${c.name} ${c.nameEn ?? ""}`));
+    const targetPosition = Math.max(1, localColumn ? localColumn.position : Math.min(3, sorted.length + 1));
+
+    let changed = false;
+    if (!existing) {
+      for (const col of board.columns) {
+        if (col.position >= targetPosition && col.position < 99) {
+          col.position += 1;
+        }
+      }
+      board.columns.push({
+        id: columnId,
+        name: "AI AGENT",
+        nameEn: "AI Agent",
+        position: targetPosition,
+        gitStage: "ai-agent",
+        branchPrefix: "ai/",
+        wipLimit: 3,
+      });
+      changed = true;
+    } else {
+      const before = JSON.stringify(existing);
+      existing.name = existing.name || "AI AGENT";
+      existing.nameEn = existing.nameEn || "AI Agent";
+      existing.gitStage = "ai-agent";
+      existing.branchPrefix = existing.branchPrefix || "ai/";
+      changed = before !== JSON.stringify(existing);
+    }
+
+    if (changed) {
+      board.columns.sort((a, b) => a.position - b.position);
+      await this.persist();
+    }
+  }
+
+  findAIAgentColumnId(columnId = "ai-agent"): string | null {
+    const board = this.getBoard();
+    const col = board.columns.find((c) => c.id === columnId || c.gitStage === "ai-agent" || /ai.?agent/i.test(`${c.id} ${c.name}`));
+    return col?.id ?? null;
+  }
+
+  findLocalColumnId(): string {
+    const board = this.getBoard();
+    const sorted = [...board.columns].sort((a, b) => a.position - b.position);
+    const local =
+      sorted.find((c) => /(^|\s)local(\s|$)|w.?trakcie|in.?progress/i.test(`${c.id} ${c.name} ${c.nameEn ?? ""}`)) ??
+      sorted.find((c) => c.gitStage === "feature") ??
+      sorted.find((c) => /origin|push|review|test|dev|prod|zrobione|done/i.test(`${c.id} ${c.name} ${c.nameEn ?? ""}`));
+    return local?.id ?? sorted[0]?.id ?? "todo";
+  }
+
   /* ---------------- Misc ---------------- */
 
   /**
@@ -916,7 +1063,33 @@ export class BoardService {
    * (which both wastes writes and races with the user's own saves).
    */
   async refreshFromStorage(): Promise<void> {
+    // If a save triggered by a local edit is still writing, wait for it
+    // before reading — otherwise this poll could fetch the pre-edit data
+    // and overwrite the in-memory board (and the open task editor) with a
+    // stale snapshot. See the comment on `inFlightSave` above.
+    if (this.inFlightSave) {
+      try {
+        await this.inFlightSave;
+      } catch {
+        // persist() already routed the failure through recoverFromFailedSave().
+      }
+    }
+    // Snapshot the edit counter right before the (possibly slow, e.g.
+    // SSH+sqlite) read starts. If a NEW local edit lands while we're waiting
+    // on storage.load() — the `inFlightSave` check above only protects
+    // against a save that was already running, not one that starts during
+    // this very read — the loaded snapshot predates that edit and must be
+    // discarded instead of overwriting it. The edit's own save (already
+    // emitted optimistically) remains in memory; the next poll will pick up
+    // its persisted result.
+    const generationBeforeLoad = this.saveGeneration;
     const fresh = this.ensureArrays(await this.storage.load());
+    if (this.saveGeneration !== generationBeforeLoad) {
+      Logger.debug(
+        "refreshFromStorage(): a local edit landed while the read was in flight — discarding the now-stale snapshot instead of overwriting it."
+      );
+      return;
+    }
     this.applyExternal(fresh);
   }
 

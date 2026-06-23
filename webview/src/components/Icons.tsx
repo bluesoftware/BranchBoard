@@ -122,6 +122,38 @@ export function BellIcon({ size = 14, style }: IconProps) {
   );
 }
 
+export function SendIcon({ size = 14, style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" style={style} aria-hidden="true">
+      <path d="M1.6 1.4a.7.7 0 01.86-.2l12.4 5.9a.7.7 0 010 1.26L2.46 14.3a.7.7 0 01-.97-.78l1.5-5.02-1.5-5.02a.7.7 0 01.11-1.08zM4.5 8l-1.1 3.7L12.6 7 3.4 2.3 4.5 6H10v2H4.5z" />
+    </svg>
+  );
+}
+
+export function ChevronDownIcon({ size = 11, style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" style={style} aria-hidden="true">
+      <path d="M3.7 5.6a.75.75 0 011.06.04L8 8.97l3.24-3.33a.75.75 0 111.08 1.04l-3.77 3.88a.75.75 0 01-1.08 0L3.7 6.68a.75.75 0 010-1.08z" />
+    </svg>
+  );
+}
+
+export function CloseIcon({ size = 12, style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" style={style} aria-hidden="true">
+      <path d="M3.3 3.3a.9.9 0 011.27 0L8 6.74l3.43-3.44a.9.9 0 111.27 1.27L9.27 8l3.43 3.43a.9.9 0 01-1.27 1.27L8 9.26l-3.43 3.44a.9.9 0 01-1.27-1.27L6.73 8 3.3 4.57a.9.9 0 010-1.27z" />
+    </svg>
+  );
+}
+
+export function AttachIcon({ size = 13, style }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" style={style} aria-hidden="true">
+      <path d="M11.1 2.3a2.6 2.6 0 013.7 3.7l-5.9 5.9a4 4 0 01-5.66-5.66l5.3-5.3a.75.75 0 111.06 1.06l-5.3 5.3a2.5 2.5 0 003.54 3.54l5.9-5.9a1.1 1.1 0 00-1.56-1.56l-5.4 5.4a.6.6 0 11-.85-.85l5.4-5.4.77-.23z" />
+    </svg>
+  );
+}
+
 export function LogoMark({ size = 18, style }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"

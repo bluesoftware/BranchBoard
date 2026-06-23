@@ -67,4 +67,42 @@ export const en: ExtMessages = {
   notifTaskDoneTitle: "Task done",
   notifTaskDoneBody: '"{title}" was marked as done.',
   notifOpenTaskAction: "Open task",
+  "aiAgent.promptGenerated": "AI Agent prompt generated.",
+  "aiAgent.confirmRunTitle": "Run the AI agent for this task?",
+  "aiAgent.confirmRunAction": "Run agent",
+  "aiAgent.confirmRunDetail":
+    "The agent may change local files on the shown branch. BranchBoard will not push, merge, deploy or delete branches.",
+  "aiAgent.noAgentSelected": "Select at least one enabled AI agent before running.",
+  "aiAgent.dirtyTree": "You have local changes. Commit or stash them before running the agent.",
+  "aiAgent.agent": "Agent",
+  "aiAgent.command": "Command",
+  "aiAgent.branch": "Branch",
+  "aiAgent.promptFile": "Prompt file",
+  "aiAgent.cancelled": "AI agent run cancelled.",
+  "aiAgent.rejected": "AI result was rejected by the user.",
+  "aiAgent.moveMissingConfig":
+    "Enable AI handling and select an agent in the task drawer first.",
+  "aiAgent.commandBlocked": "AI agent command '{command}' is not allowed.",
+  "aiAgent.commandBlockedDetail":
+    "Add the exact binary name or absolute path to branchBoard.allowedAIAgentCommands only if you trust it.",
+  "aiAgent.commandMissing": "AI agent command '{command}' was not found.",
+  "aiAgent.commandMissingDetail":
+    "Install the agent CLI or update branchBoard.aiAgents to an installed binary. BranchBoard searched PATH and common tool folders: {paths}",
+  "aiAgent.commandMissingAbsoluteDetail":
+    "The configured absolute path does not exist or is not executable. Install the agent CLI or update branchBoard.aiAgents and branchBoard.allowedAIAgentCommands.",
+  "aiAgent.timedOut": "The agent did not respond within {seconds}s and was stopped.",
+  "aiAgent.cancelledByUser": "The agent was stopped by the user.",
+  "aiAgent.modelsNoListCommand":
+    "Agent '{name}' has no model-listing command configured (listModelsArgs) — add one in branchBoard.aiAgents if its CLI supports it.",
+  "aiAgent.modelsFetchFailed": "Failed to fetch the model list for agent '{name}'.",
+  "aiAgent.modelsUnparseable": "Agent '{name}''s CLI returned output that couldn't be recognized as a model list.",
+  "aiAgent.alreadyRunning": "An agent is already running for this task — wait for it to finish or stop it.",
+  "aiAgent.stopRequested": "Stop request sent to the agent.",
+  "aiAgent.noActiveRun": "This agent is not currently running.",
+  "aiAgent.consoleResultHeading": "Result",
+  "aiAgent.consoleUsageLine":
+    "📊 Tokens: input {input} • output {output} • cache read {cacheRead} • cache write {cacheWrite}",
+  "aiAgent.optimizeFailed": "Prompt optimization with agent '{name}' failed — the original prompt was used instead.",
+  "aiAgent.optimizeEmpty": "Agent '{name}' returned an empty prompt-optimization result — the original prompt was used instead.",
+  "aiAgent.promptOptimized": "The prompt was optimized before sending (model: {name}).",
 };

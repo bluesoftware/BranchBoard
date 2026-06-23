@@ -156,6 +156,25 @@ export class LocalJsonStorageProvider implements StorageProvider {
       priority: t.priority ?? "none",
       status: t.status ?? "open",
       finishedAt: t.finishedAt ?? null,
+      aiAgents: t.aiAgents
+        ? {
+            enabled: !!t.aiAgents.enabled,
+            status: t.aiAgents.status ?? "not_configured",
+            selectedAgentIds: Array.isArray(t.aiAgents.selectedAgentIds) ? t.aiAgents.selectedAgentIds : [],
+            selectedModel: t.aiAgents.selectedModel ?? "",
+            prompt: t.aiAgents.prompt ?? "",
+            plan: t.aiAgents.plan ?? "",
+            planFile: t.aiAgents.planFile ?? "",
+            result: t.aiAgents.result ?? "",
+            reviewResult: t.aiAgents.reviewResult ?? "",
+            lastRunAt: t.aiAgents.lastRunAt,
+            lastFinishedAt: t.aiAgents.lastFinishedAt,
+            error: t.aiAgents.error ?? "",
+            createdBranch: t.aiAgents.createdBranch ?? "",
+            changedFiles: Array.isArray(t.aiAgents.changedFiles) ? t.aiAgents.changedFiles : [],
+            runHistory: Array.isArray(t.aiAgents.runHistory) ? t.aiAgents.runHistory : [],
+          }
+        : undefined,
     }));
     board.version = BOARD_SCHEMA_VERSION;
     return board;

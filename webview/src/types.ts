@@ -8,7 +8,7 @@ export type TaskType = "feature" | "bugfix" | "hotfix" | "chore" | "refactor" | 
 
 export const TASK_TYPES: TaskType[] = ["feature", "bugfix", "hotfix", "chore", "refactor", "docs"];
 
-export type GitStage = "none" | "feature" | "review" | "staging" | "production";
+export type GitStage = "none" | "ai-agent" | "feature" | "review" | "staging" | "production";
 
 /** Live Git-truth location of a task's branch (see src/types.ts for details). */
 export type BranchLocationState = "local" | "origin" | "dev" | "prod";
@@ -69,6 +69,152 @@ export interface ChecklistItem {
   done: boolean;
 }
 
+export type AIAgentStatus =
+  | "not_configured"
+  | "ready"
+  | "planning"
+  | "running"
+  | "reviewing"
+  | "finished"
+  | "failed"
+  | "cancelled";
+
+export type AIAgentRunStatus = "planning" | "running" | "reviewing" | "finished" | "failed" | "cancelled";
+
+export type AIAgentRunKind = "plan" | "run" | "review";
+
+/** One live stdout/stderr chunk from a running AI agent — see src/types.ts AIAgentLogPayload. Transient, not persisted. */
+export interface AIAgentLogPayload {
+  taskId: string;
+  kind: AIAgentRunKind;
+  stream: "stdout" | "stderr" | "system";
+  text: string;
+}
+
+/** Authoritative "agent busy" signal for one task/run — see src/types.ts AIAgentLifecyclePayload. */
+export interface AIAgentLifecyclePayload {
+  taskId: string;
+  kind: AIAgentRunKind;
+  phase: "started" | "finished" | "failed" | "cancelled";
+  message?: string;
+}
+
+export type AIAgentChangedFileStatus = "added" | "modified" | "deleted" | "renamed";
+
+export interface AIAgentChangedFile {
+  path: string;
+  status: AIAgentChangedFileStatus;
+}
+
+/** Token usage reported by an AI agent CLI, normalized across naming conventions. */
+export interface AIAgentUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
+
+/** Approximate cost computed from AIAgentUsage and an AIAgentDefinition's pricing. */
+export interface AIAgentCostEstimate {
+  currency: string;
+  inputCost: number;
+  outputCost: number;
+  cacheReadCost: number;
+  cacheWriteCost: number;
+  totalCost: number;
+}
+
+export interface AIAgentRunHistoryItem {
+  id: string;
+  agentId: string;
+  model?: string;
+  status: AIAgentRunStatus;
+  /** Which workflow step produced this turn — lets the UI render a proper chat timeline (plan/run/review messages) instead of one flat list. Optional only for backward-compat with history entries persisted before this field existed. */
+  kind?: "plan" | "run" | "review";
+  startedAt: string;
+  finishedAt?: string;
+  prompt: string;
+  plan?: string;
+  result?: string;
+  reviewResult?: string;
+  /** Files changed by this specific turn (only meaningful for kind === "run"). */
+  changedFiles?: AIAgentChangedFile[];
+  error?: string;
+  branch?: string;
+  usage?: AIAgentUsage;
+  cost?: AIAgentCostEstimate;
+}
+
+export interface TaskAIAgents {
+  enabled: boolean;
+  status: AIAgentStatus;
+  selectedAgentIds: string[];
+  /** IDs (file paths relative to .cursor/agents) of selected Cursor sub-agent personas. */
+  selectedCursorAgentIds?: string[];
+  selectedModel?: string;
+  prompt?: string;
+  plan?: string;
+  planFile?: string;
+  result?: string;
+  reviewResult?: string;
+  lastRunAt?: string;
+  lastFinishedAt?: string;
+  error?: string;
+  createdBranch?: string;
+  changedFiles?: AIAgentChangedFile[];
+  runHistory?: AIAgentRunHistoryItem[];
+  lastUsage?: AIAgentUsage;
+  lastCost?: AIAgentCostEstimate;
+  costMemory?: AiSessionMemory;
+  lastCostDecision?: AiCostDecision;
+}
+
+/* ---------- AI Cost Guard / Local AI Optimizer (mirrors src/types.ts) ---------- */
+
+export type AiCostMode = "auto" | "cheap" | "balanced" | "quality" | "manual";
+export type AiContextLevel = "small" | "normal" | "full";
+export type AiCostRisk = "low" | "medium" | "high";
+export type AiDecisionAction = "answer_local" | "prepare_prompt" | "cursor_plan" | "cursor_work" | "cursor_review";
+export type AiLocalOptimizerProvider = "local-command" | "openai-compatible-http";
+
+export interface AiCostDecision {
+  action: AiDecisionAction;
+  costRisk: AiCostRisk;
+  contextLevel: AiContextLevel;
+  modelPreference?: string;
+  selectedFiles: string[];
+  includeDiff: boolean;
+  includeFullFiles: boolean;
+  includeChatHistory: boolean;
+  includeChatSummary: boolean;
+  requiresUserConfirmation: boolean;
+  reason: string;
+  optimizedPrompt: string;
+}
+
+export interface AiSessionMemory {
+  lastPlanSummary?: string;
+  lastRunSummary?: string;
+  lastReviewSummary?: string;
+  lastFileList?: string[];
+  lastChatSummary?: string;
+  updatedAt?: string;
+}
+
+export interface AiCostDecisionRequestPayload {
+  taskId: string;
+  userMessage: string;
+  forceAction?: AiDecisionAction;
+  forceContextLevel?: AiContextLevel;
+  confirmed?: boolean;
+}
+
+export interface AiCostDecisionPayload extends AiCostDecision {
+  taskId: string;
+  usedLocalModel: boolean;
+  localModelError?: string;
+}
+
 export interface BoardTask {
   id: string;
   title: string;
@@ -90,6 +236,7 @@ export interface BoardTask {
   acceptanceCriteria?: string;
   attachedFiles?: string[];
   ai?: TaskAI;
+  aiAgents?: TaskAIAgents;
 }
 
 export interface TaskAI {
@@ -116,7 +263,17 @@ export type BoardEventType =
   | "merge_failed"
   | "dev_deploy_started"
   | "dev_deploy_finished"
-  | "dev_deploy_failed";
+  | "dev_deploy_failed"
+  | "branch_updated_from_main"
+  | "ai_prompt_generated"
+  | "ai_agent_plan_started"
+  | "ai_agent_plan_finished"
+  | "ai_agent_run_started"
+  | "ai_agent_run_finished"
+  | "ai_agent_run_failed"
+  | "ai_review_started"
+  | "ai_review_finished"
+  | "ai_task_moved_to_local";
 
 export interface BoardEvent {
   id: string;
@@ -436,6 +593,59 @@ export interface GitInfo {
   error?: string;
 }
 
+export interface AIAgentPricing {
+  currency?: string;
+  inputPerMTok?: number;
+  outputPerMTok?: number;
+  cacheReadPerMTok?: number;
+  cacheWritePerMTok?: number;
+}
+
+/** Per-model pricing/active override — mirrors src/types.ts AIAgentModelPricing. */
+export interface AIAgentModelPricing {
+  modelId: string;
+  pricing?: AIAgentPricing;
+  active?: boolean;
+}
+
+export interface AIAgentDefinition {
+  id: string;
+  name: string;
+  command: string;
+  args: string[];
+  enabled: boolean;
+  allowModels: boolean;
+  models?: string[];
+  pricing?: AIAgentPricing;
+  modelPricing?: AIAgentModelPricing[];
+  listModelsArgs?: string[];
+}
+
+/** Mirrors src/types.ts AIAgentModelsResultPayload. */
+export interface AIAgentModelsResultPayload {
+  agentId: string;
+  ok: boolean;
+  models: string[];
+  modelsMissingPrice: string[];
+  message?: string;
+  detail?: string;
+}
+
+/**
+ * A Cursor sub-agent persona discovered from a `.cursor/agents/*.md` file in
+ * the workspace (mirrors src/types.ts CursorSubAgentInfo).
+ */
+export interface CursorSubAgentInfo {
+  id: string;
+  filePath: string;
+  name: string;
+  description: string;
+  body: string;
+  fileTriggers: string[];
+  keywordTriggers: string[];
+  updatedAt: string;
+}
+
 export interface AppearanceConfig {
   compactMode: boolean;
   showBranchBadges: boolean;
@@ -445,6 +655,40 @@ export interface AppearanceConfig {
   showPriority: boolean;
   reduceAnimations: boolean;
 }
+
+export const TITLE_BAR_PRESETS = [
+  "custom",
+  "default",
+  "dracula",
+  "oneDarkPro",
+  "nightOwl",
+  "monokai",
+  "solarizedDark",
+] as const;
+export type TitleBarPreset = (typeof TITLE_BAR_PRESETS)[number];
+
+/**
+ * Window/Cursor title bar customization mirrored from the extension side —
+ * see src/types.ts for the full explanation of how this maps onto
+ * `workbench.colorCustomizations` + `window.title`.
+ */
+export interface TitleBarConfig {
+  enabled: boolean;
+  preset: TitleBarPreset;
+  backgroundColor: string;
+  foregroundColor: string;
+  borderColor: string;
+  inactiveBackgroundColor: string;
+  inactiveForegroundColor: string;
+  showBranch: boolean;
+  branchSeparator: string;
+  branchButtonEnabled: boolean;
+  branchButtonColor: string;
+  branchButtonBackground: BranchButtonBackground;
+}
+
+export const BRANCH_BUTTON_BACKGROUNDS = ["none", "prominent", "warning", "error"] as const;
+export type BranchButtonBackground = (typeof BRANCH_BUTTON_BACKGROUNDS)[number];
 
 export interface NotificationSettings {
   enabled: boolean;
@@ -506,8 +750,10 @@ export interface AppConfig {
     sqliteRemotePath: string;
   };
   appearance: AppearanceConfig;
+  titleBar: TitleBarConfig;
   notifications: NotificationSettings;
   adminAnnouncement: AdminAnnouncementConfig;
+  aiAgents: AIAgentDefinition[];
   /** webview-resolved URIs for the bundled notification sounds, keyed by id. */
   soundFiles: Record<string, string>;
   policy: {
@@ -544,6 +790,24 @@ export interface AppConfig {
     runGitActionsOnMove: boolean;
     /** Whether move-driven Git actions ask for confirmation before running. */
     confirmGitActionsOnMove: boolean;
+    enableAIAgentColumn: boolean;
+    aiAgentColumnId: string;
+    requireConfirmationBeforeAIAgentRun: boolean;
+    requireCleanTreeBeforeAIAgentRun: boolean;
+    aiAgentTimeoutSeconds: number;
+    allowedAIAgentCommands: string[];
+    defaultAIBranchPrefix: string;
+    moveToLocalAfterAIAgentSuccess: boolean;
+    aiCostMode: AiCostMode;
+    aiLocalOptimizerEnabled: boolean;
+    aiLocalOptimizerProvider: AiLocalOptimizerProvider;
+    aiCli: {
+      defaultContextLevel: AiContextLevel;
+      requireConfirmForFullContext: boolean;
+      maxFilesInContext: number;
+      maxPromptChars: number;
+      expensiveModelsRequireConfirm: boolean;
+    };
   };
 }
 

@@ -65,6 +65,45 @@ export const pl = {
   notifTaskDoneTitle: "Zadanie zrobione",
   notifTaskDoneBody: '"{title}" oznaczono jako zrobione.',
   notifOpenTaskAction: "Otwórz zadanie",
+  "aiAgent.promptGenerated": "Prompt AI Agent został wygenerowany.",
+  "aiAgent.confirmRunTitle": "Uruchomić agenta AI dla tego zadania?",
+  "aiAgent.confirmRunAction": "Uruchom agenta",
+  "aiAgent.confirmRunDetail":
+    "Agent może zmienić lokalne pliki na wskazanym branchu. BranchBoard nie wykona push, merge, deploy ani usuwania branchy.",
+  "aiAgent.noAgentSelected": "Wybierz przynajmniej jednego aktywnego agenta AI przed uruchomieniem.",
+  "aiAgent.dirtyTree": "Masz lokalne zmiany. Commit/stash przed uruchomieniem agenta.",
+  "aiAgent.agent": "Agent",
+  "aiAgent.command": "Komenda",
+  "aiAgent.branch": "Branch",
+  "aiAgent.promptFile": "Plik prompta",
+  "aiAgent.cancelled": "Uruchomienie agenta zostało anulowane.",
+  "aiAgent.rejected": "Wynik AI został odrzucony przez użytkownika.",
+  "aiAgent.moveMissingConfig":
+    "Najpierw włącz obsługę przez AI i wybierz agenta w drawerze zadania.",
+  "aiAgent.commandBlocked": "Komenda agenta AI '{command}' nie jest dozwolona.",
+  "aiAgent.commandBlockedDetail":
+    "Dodaj dokładną nazwę binarki albo ścieżkę absolutną do branchBoard.allowedAIAgentCommands tylko wtedy, gdy jej ufasz.",
+  "aiAgent.commandMissing": "Nie znaleziono komendy agenta AI '{command}'.",
+  "aiAgent.commandMissingDetail":
+    "Zainstaluj CLI agenta albo ustaw branchBoard.aiAgents na istniejącą binarkę. BranchBoard sprawdził PATH i typowe foldery narzędzi: {paths}",
+  "aiAgent.commandMissingAbsoluteDetail":
+    "Skonfigurowana ścieżka absolutna nie istnieje albo nie jest wykonywalna. Zainstaluj CLI agenta albo popraw branchBoard.aiAgents i branchBoard.allowedAIAgentCommands.",
+  "aiAgent.timedOut": "Agent nie odpowiedział w ciągu {seconds}s i został zatrzymany.",
+  "aiAgent.cancelledByUser": "Agent został zatrzymany przez użytkownika.",
+  "aiAgent.modelsNoListCommand":
+    "Agent '{name}' nie ma skonfigurowanej komendy listowania modeli (listModelsArgs) — dodaj ją w branchBoard.aiAgents, jeśli CLI to wspiera.",
+  "aiAgent.modelsFetchFailed": "Nie udało się pobrać listy modeli dla agenta '{name}'.",
+  "aiAgent.modelsUnparseable":
+    "CLI agenta '{name}' zwróciło wynik, którego nie udało się rozpoznać jako listy modeli.",
+  "aiAgent.alreadyRunning": "Agent już pracuje na tym zadaniu — zaczekaj na zakończenie albo go zatrzymaj.",
+  "aiAgent.stopRequested": "Wysłano żądanie zatrzymania agenta.",
+  "aiAgent.noActiveRun": "Ten agent nie jest aktualnie uruchomiony.",
+  "aiAgent.consoleResultHeading": "Wynik",
+  "aiAgent.consoleUsageLine":
+    "📊 Tokeny: wejście {input} • wyjście {output} • cache odczyt {cacheRead} • cache zapis {cacheWrite}",
+  "aiAgent.optimizeFailed": "Optymalizacja promptu agentem '{name}' nie powiodła się — użyto oryginalnego promptu.",
+  "aiAgent.optimizeEmpty": "Agent '{name}' zwrócił pusty wynik optymalizacji promptu — użyto oryginalnego promptu.",
+  "aiAgent.promptOptimized": "Prompt został zoptymalizowany przed wysłaniem (model: {name}).",
 };
 
 export type ExtMessages = typeof pl;

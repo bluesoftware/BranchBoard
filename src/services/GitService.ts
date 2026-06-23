@@ -1,5 +1,6 @@
 import { execFile } from "child_process";
-import { BoardTask, BranchBoardConfig, BranchLocationState, FileMentionEntry, GitInfo, OperationResult } from "../types";
+import { AIAgentChangedFile, BoardTask, BranchBoardConfig, BranchLocationState, FileMentionEntry, GitInfo, OperationResult } from "../types";
+import { AIAgentService } from "./AIAgentService";
 import { SafetyService } from "./SafetyService";
 
 interface GitExecResult {
@@ -1006,6 +1007,29 @@ export class GitService {
       return stdout.trim().length > 0;
     } catch {
       return false;
+    }
+  }
+
+  /** Working-tree changed files, including untracked files. Read-only. */
+  async getWorkingTreeChangedFiles(): Promise<AIAgentChangedFile[]> {
+    try {
+      const { stdout } = await this.run(["status", "--porcelain"]);
+      const files: AIAgentChangedFile[] = [];
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        const code = line.slice(0, 2);
+        const rawPath = line.slice(3).trim();
+        const path = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop()!.trim() : rawPath;
+        if (!path) {
+          continue;
+        }
+        files.push({ path, status: AIAgentService.mapGitStatus(code) });
+      }
+      return files.slice(0, 500);
+    } catch {
+      return [];
     }
   }
 

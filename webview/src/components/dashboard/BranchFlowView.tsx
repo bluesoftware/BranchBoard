@@ -97,7 +97,7 @@ export function BranchFlowView(props: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [linkFor, setLinkFor] = useState<string | null>(null);
 
-  const aiTaskIds = new Set(board.tasks.filter((x) => x.ai?.createdByAi).map((x) => x.id));
+  const aiTaskIds = new Set(board.tasks.filter((x) => x.ai?.createdByAi || x.aiAgents?.enabled).map((x) => x.id));
   const tasksWithoutBranch = board.tasks.filter((x) => !x.branchName);
 
   const matchReview = (row: BranchFlowRow) =>

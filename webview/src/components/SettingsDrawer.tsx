@@ -1,5 +1,15 @@
 import { useRef, useState } from "react";
-import { AppConfig, BoardData, BoardUser, ConnectionTestResult, GitInfo } from "../types";
+import {
+  AIAgentDefinition,
+  AIAgentModelPricing,
+  AIAgentModelsResultPayload,
+  AppConfig,
+  BoardData,
+  BoardUser,
+  BRANCH_BUTTON_BACKGROUNDS,
+  ConnectionTestResult,
+  GitInfo,
+} from "../types";
 import { t } from "../i18n";
 import { HelpIcon } from "./common/HelpIcon";
 
@@ -20,6 +30,8 @@ interface Props {
   onSelectSshKey: () => void;
   onTestConnection: () => void;
   onShowLogs: () => void;
+  aiAgentModelsByAgent: Record<string, AIAgentModelsResultPayload>;
+  onListAIAgentModels: (agentId: string) => void;
 }
 
 const AVATAR_PALETTE = [
@@ -169,7 +181,46 @@ function ProfileEditor({
   );
 }
 
-type Tab = "general" | "git" | "users" | "appearance" | "notifications" | "sync" | "ai";
+type Tab = "general" | "git" | "users" | "appearance" | "titleBar" | "notifications" | "sync" | "ai";
+
+type TitleBarPresetKey = "default" | "dracula" | "oneDarkPro" | "nightOwl" | "monokai" | "solarizedDark";
+
+/** Mirrors TitleBarService's PRESETS on the extension side — used only to
+ * render preset swatches/preview here; the extension is the source of truth
+ * for what actually gets applied. */
+const TITLE_BAR_PRESET_COLORS: Record<TitleBarPresetKey, {
+  backgroundColor: string;
+  foregroundColor: string;
+  borderColor: string;
+  inactiveBackgroundColor: string;
+  inactiveForegroundColor: string;
+}> = {
+  default: { backgroundColor: "#1f1f1f", foregroundColor: "#cccccc", borderColor: "#000000", inactiveBackgroundColor: "#181818", inactiveForegroundColor: "#6b6b6b" },
+  dracula: { backgroundColor: "#282a36", foregroundColor: "#f8f8f2", borderColor: "#191a21", inactiveBackgroundColor: "#21222c", inactiveForegroundColor: "#6272a4" },
+  oneDarkPro: { backgroundColor: "#282c34", foregroundColor: "#abb2bf", borderColor: "#181a1f", inactiveBackgroundColor: "#21252b", inactiveForegroundColor: "#5c6370" },
+  nightOwl: { backgroundColor: "#011627", foregroundColor: "#d6deeb", borderColor: "#01101d", inactiveBackgroundColor: "#010e1a", inactiveForegroundColor: "#4b6479" },
+  monokai: { backgroundColor: "#272822", foregroundColor: "#f8f8f2", borderColor: "#1e1f1a", inactiveBackgroundColor: "#1e1f1a", inactiveForegroundColor: "#75715e" },
+  solarizedDark: { backgroundColor: "#073642", foregroundColor: "#eee8d5", borderColor: "#04282f", inactiveBackgroundColor: "#04282f", inactiveForegroundColor: "#657b83" },
+};
+
+const TITLE_BAR_PRESET_LABEL_KEYS: Record<TitleBarPresetKey, string> = {
+  default: "settings.titleBarPresetDefault",
+  dracula: "settings.titleBarPresetDracula",
+  oneDarkPro: "settings.titleBarPresetOneDarkPro",
+  nightOwl: "settings.titleBarPresetNightOwl",
+  monokai: "settings.titleBarPresetMonokai",
+  solarizedDark: "settings.titleBarPresetSolarizedDark",
+};
+
+/** Mirrors the `statusBarItem.*Background` theme colors used by
+ *  BranchStatusBarService, for an approximate live preview only — the real
+ *  color comes from the user's active theme. */
+const BRANCH_BUTTON_PREVIEW_BG: Record<(typeof BRANCH_BUTTON_BACKGROUNDS)[number], string> = {
+  none: "transparent",
+  prominent: "#0e639c",
+  warning: "#7a5c00",
+  error: "#a1260d",
+};
 
 function Toggle({
   value,
@@ -257,6 +308,222 @@ function SoundPicker({
   );
 }
 
+const TITLE_BAR_HEX_SWATCHES = [
+  "#1f1f1f", "#282a36", "#282c34", "#011627", "#272822", "#073642",
+  "#0d1117", "#1e1e1e", "#22272e", "#161b22",
+];
+
+function ColorField({
+  label,
+  value,
+  onChange,
+  help,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  help?: string;
+}) {
+  return (
+    <div className="bb-field">
+      <label className="bb-label-help">
+        {label}
+        {help && <HelpIcon text={help} />}
+      </label>
+      <div className="bb-color-swatches">
+        {TITLE_BAR_HEX_SWATCHES.map((c) => (
+          <button
+            key={c}
+            className={`bb-swatch ${value.toLowerCase() === c ? "active" : ""}`}
+            style={{ background: c }}
+            title={c}
+            onClick={() => onChange(c)}
+          />
+        ))}
+        <input
+          type="color"
+          className="bb-swatch bb-swatch-custom"
+          value={/^#([0-9a-fA-F]{6})$/.test(value) ? value : "#1f1f1f"}
+          onChange={(e) => onChange(e.target.value)}
+          title={t("settings.customColor")}
+        />
+        <input
+          className="bb-input bb-mono"
+          style={{ width: 90 }}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function hasPricingRate(pricing: AIAgentModelPricing["pricing"] | undefined): boolean {
+  return !!pricing && !!(pricing.inputPerMTok || pricing.outputPerMTok || pricing.cacheReadPerMTok || pricing.cacheWritePerMTok);
+}
+
+/**
+ * Per-agent panel: lets the user refresh the model list from the agent's CLI
+ * (when `listModelsArgs` is configured), see which known models have no
+ * price entered yet, and edit each model's pricing/active flag in place.
+ * Saves always write the *entire* `aiAgents` array back via onSaveAgents —
+ * BranchBoard's "saveSettings" channel replaces the whole setting value, so
+ * a partial patch here would silently drop every other agent.
+ */
+function AIAgentModelsEditor({
+  agent,
+  fetchResult,
+  onListModels,
+  onSaveAgents,
+  allAgents,
+}: {
+  agent: AIAgentDefinition;
+  fetchResult: AIAgentModelsResultPayload | undefined;
+  onListModels: () => void;
+  onSaveAgents: (next: AIAgentDefinition[]) => void;
+  allAgents: AIAgentDefinition[];
+}) {
+  const knownModels = Array.from(
+    new Set([...(agent.models ?? []), ...(fetchResult?.models ?? []), ...((agent.modelPricing ?? []).map((m) => m.modelId))])
+  );
+
+  const updateModel = (modelId: string, patch: Partial<AIAgentModelPricing>) => {
+    const existing = agent.modelPricing ?? [];
+    const idx = existing.findIndex((m) => m.modelId === modelId);
+    const current: AIAgentModelPricing = idx >= 0 ? existing[idx] : { modelId, active: true };
+    const updatedEntry: AIAgentModelPricing = {
+      ...current,
+      ...patch,
+      pricing: { ...current.pricing, ...patch.pricing },
+    };
+    const nextModelPricing = idx >= 0 ? existing.map((m, i) => (i === idx ? updatedEntry : m)) : [...existing, updatedEntry];
+    const nextAgents = allAgents.map((a) => (a.id === agent.id ? { ...a, modelPricing: nextModelPricing } : a));
+    onSaveAgents(nextAgents);
+  };
+
+  const setAllModelsActive = (active: boolean) => {
+    const existing = agent.modelPricing ?? [];
+    const nextModelPricing = knownModels.map((modelId) => {
+      const current = existing.find((m) => m.modelId === modelId);
+      return current ? { ...current, active } : { modelId, active };
+    });
+    const nextAgents = allAgents.map((a) => (a.id === agent.id ? { ...a, modelPricing: nextModelPricing } : a));
+    onSaveAgents(nextAgents);
+  };
+
+  const numberField = (modelId: string, key: keyof NonNullable<AIAgentModelPricing["pricing"]>, override: AIAgentModelPricing | undefined) => (
+    <td>
+      <label className="bb-ai-price-field">
+        <input
+          className="bb-input bb-mono"
+          type="number"
+          min={0}
+          step="0.01"
+          placeholder="—"
+          defaultValue={override?.pricing?.[key] ?? ""}
+          onBlur={(e) => {
+            const raw = e.target.value.trim();
+            const value = raw === "" ? undefined : Number(raw);
+            updateModel(modelId, { pricing: { [key]: value && !Number.isNaN(value) ? value : undefined } as any });
+          }}
+        />
+      </label>
+    </td>
+  );
+
+  return (
+    <div className="bb-ai-agent-models-card">
+      <div className="bb-ai-agent-models-head">
+        <div>
+          <strong>{agent.name}</strong>
+          <span className="bb-muted small"> — {agent.command}</span>
+        </div>
+        <button
+          className="bb-btn bb-ai-agent-refresh-btn"
+          onClick={onListModels}
+          disabled={!agent.listModelsArgs || agent.listModelsArgs.length === 0}
+          title={
+            !agent.listModelsArgs || agent.listModelsArgs.length === 0
+              ? t("settings.aiAgentsNoListCommand")
+              : t("settings.aiAgentsRefreshModels")
+          }
+        >
+          {t("settings.aiAgentsRefreshModels")}
+        </button>
+      </div>
+
+      {fetchResult && !fetchResult.ok && (
+        <div className="bb-ai-agent-models-error">
+          {fetchResult.message}
+          {fetchResult.detail && <div className="bb-muted small">{fetchResult.detail}</div>}
+        </div>
+      )}
+      {fetchResult?.ok && (
+        <div className="bb-muted small">{t("settings.aiAgentsModelsFetched", { count: String(fetchResult.models.length) })}</div>
+      )}
+
+      {knownModels.length === 0 ? (
+        <div className="bb-muted small">{t("settings.aiAgentsNoModels")}</div>
+      ) : (
+        <>
+          <div className="bb-ai-agent-models-bulk">
+            <button className="bb-btn bb-btn-sm" onClick={() => setAllModelsActive(true)}>
+              {t("settings.aiAgentsSelectAll")}
+            </button>
+            <button className="bb-btn bb-btn-sm" onClick={() => setAllModelsActive(false)}>
+              {t("settings.aiAgentsDeselectAll")}
+            </button>
+          </div>
+          <table className="bb-ai-agent-models-table">
+          <thead>
+            <tr>
+              <th>{t("settings.aiAgentsModel")}</th>
+              <th>{t("settings.aiAgentsActive")}</th>
+              <th>{t("settings.aiAgentsInputPrice")}</th>
+              <th>{t("settings.aiAgentsOutputPrice")}</th>
+              <th>{t("settings.aiAgentsCacheReadPrice")}</th>
+              <th>{t("settings.aiAgentsCacheWritePrice")}</th>
+              <th>{t("settings.aiAgentsPriceStatus")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {knownModels.map((modelId) => {
+              const override = (agent.modelPricing ?? []).find((m) => m.modelId === modelId);
+              const effectivePricing = override?.pricing ?? agent.pricing;
+              const missingPrice = !hasPricingRate(effectivePricing);
+              const active = override?.active ?? true;
+              return (
+                <tr key={modelId}>
+                  <td className="bb-mono">{modelId}</td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      onChange={(e) => updateModel(modelId, { active: e.target.checked })}
+                    />
+                  </td>
+                  {numberField(modelId, "inputPerMTok", override)}
+                  {numberField(modelId, "outputPerMTok", override)}
+                  {numberField(modelId, "cacheReadPerMTok", override)}
+                  {numberField(modelId, "cacheWritePerMTok", override)}
+                  <td>
+                    {missingPrice ? (
+                      <span className="bb-badge tone-warning">{t("settings.aiAgentsPriceMissing")}</span>
+                    ) : (
+                      <span className="bb-badge tone-success">{t("settings.aiAgentsPriceSet")}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SettingsDrawer(props: Props) {
   const { appConfig, board, git } = props;
   const [tab, setTab] = useState<Tab>("general");
@@ -266,36 +533,41 @@ export function SettingsDrawer(props: Props) {
   const save = (key: string, value: unknown) => props.onSave({ [key]: value });
   const p = appConfig.policy;
   const a = appConfig.appearance;
+  const tb = appConfig.titleBar;
   const nf = appConfig.notifications;
   const ssh = appConfig.ssh;
   const activeServer = appConfig.activeStorageKind === "server";
   const conn = props.connectionStatus;
 
   return (
-    <div className="bb-drawer-overlay" onMouseDown={props.onClose}>
-      <aside className="bb-drawer" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="bb-drawer-head">
-          <span className="bb-drawer-title" style={{ cursor: "default" }}>
-            {t("settings.title")}
-          </span>
-          <button className="bb-iconbtn" onClick={props.onClose} title={t("settings.close")}>
-            ✕
-          </button>
-        </div>
+    <div className="bb-settings-overlay" onMouseDown={props.onClose}>
+      <div className="bb-settings-panel" onMouseDown={(e) => e.stopPropagation()}>
+        <aside className="bb-settings-sidebar">
+          <div className="bb-settings-brand">BranchBoard</div>
+          <nav className="bb-settings-nav">
+            {(["general", "git", "users", "appearance", "titleBar", "notifications", "sync", "ai"] as Tab[]).map((key) => (
+              <button
+                key={key}
+                className={`bb-settings-navitem ${tab === key ? "active" : ""}`}
+                onClick={() => setTab(key)}
+              >
+                {t(`settings.${key}`)}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-        <div className="bb-settings-tabs">
-          {(["general", "git", "users", "appearance", "notifications", "sync", "ai"] as Tab[]).map((key) => (
-            <button
-              key={key}
-              className={`bb-tab ${tab === key ? "active" : ""}`}
-              onClick={() => setTab(key)}
-            >
-              {t(`settings.${key}`)}
+        <div className="bb-settings-main">
+          <div className="bb-drawer-head">
+            <span className="bb-drawer-title" style={{ cursor: "default" }}>
+              {t("settings.title")}
+            </span>
+            <button className="bb-iconbtn" onClick={props.onClose} title={t("settings.close")}>
+              ✕
             </button>
-          ))}
-        </div>
+          </div>
 
-        <div className="bb-drawer-body">
+          <div className="bb-drawer-body">
           {tab === "general" && (
             <>
               <div className="bb-field">
@@ -513,6 +785,191 @@ export function SettingsDrawer(props: Props) {
             </>
           )}
 
+          {tab === "titleBar" && (
+            <>
+              <Toggle
+                label={t("settings.titleBarEnabled")}
+                help={t("settings.titleBarEnabledHint")}
+                value={tb.enabled}
+                onChange={(v) => save("titleBar.enabled", v)}
+              />
+
+              {(() => {
+                const presetColors =
+                  tb.preset !== "custom" && tb.preset in TITLE_BAR_PRESET_COLORS
+                    ? TITLE_BAR_PRESET_COLORS[tb.preset as TitleBarPresetKey]
+                    : {
+                        backgroundColor: tb.backgroundColor,
+                        foregroundColor: tb.foregroundColor,
+                        borderColor: tb.borderColor,
+                        inactiveBackgroundColor: tb.inactiveBackgroundColor,
+                        inactiveForegroundColor: tb.inactiveForegroundColor,
+                      };
+                return (
+                  <div className="bb-section" style={{ opacity: tb.enabled ? 1 : 0.5 }}>
+                    <div className="bb-section-title">{t("settings.titleBarPreview")}</div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        padding: "0 12px",
+                        height: 30,
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontFamily: "var(--vscode-font-family, sans-serif)",
+                        background: presetColors.backgroundColor,
+                        color: presetColors.foregroundColor,
+                        borderBottom: `2px solid ${presetColors.borderColor}`,
+                      }}
+                    >
+                      <span>{appConfig.projectName || appConfig.boardTitle}</span>
+                      {tb.showBranch && (
+                        <span style={{ color: presetColors.inactiveForegroundColor, marginLeft: 2 }}>
+                          {tb.branchSeparator || "  ⎇ "}feature/login
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="bb-section">
+                <div className="bb-section-title">{t("settings.titleBarPresetSection")}</div>
+                <div className="bb-color-swatches" style={{ flexWrap: "wrap" }}>
+                  <button
+                    className={`bb-btn ghost sm ${tb.preset === "custom" ? "active" : ""}`}
+                    onClick={() => {
+                      save("titleBar.preset", "custom");
+                      save("titleBar.enabled", true);
+                    }}
+                  >
+                    {t("settings.titleBarPresetCustom")}
+                  </button>
+                  {(Object.keys(TITLE_BAR_PRESET_COLORS) as TitleBarPresetKey[]).map((key) => (
+                    <button
+                      key={key}
+                      className={`bb-btn ghost sm ${tb.preset === key ? "active" : ""}`}
+                      style={{
+                        borderLeft: `4px solid ${TITLE_BAR_PRESET_COLORS[key].backgroundColor}`,
+                      }}
+                      onClick={() => {
+                        save("titleBar.preset", key);
+                        save("titleBar.enabled", true);
+                      }}
+                    >
+                      {t(TITLE_BAR_PRESET_LABEL_KEYS[key])}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {tb.preset === "custom" && (
+                <div className="bb-section">
+                  <div className="bb-section-title">{t("settings.titleBarColorsSection")}</div>
+                  <ColorField
+                    label={t("settings.titleBarBackground")}
+                    value={tb.backgroundColor}
+                    onChange={(v) => save("titleBar.backgroundColor", v)}
+                  />
+                  <ColorField
+                    label={t("settings.titleBarForeground")}
+                    value={tb.foregroundColor}
+                    onChange={(v) => save("titleBar.foregroundColor", v)}
+                  />
+                  <ColorField
+                    label={t("settings.titleBarBorder")}
+                    value={tb.borderColor}
+                    onChange={(v) => save("titleBar.borderColor", v)}
+                  />
+                  <ColorField
+                    label={t("settings.titleBarInactiveBackground")}
+                    value={tb.inactiveBackgroundColor}
+                    onChange={(v) => save("titleBar.inactiveBackgroundColor", v)}
+                  />
+                  <ColorField
+                    label={t("settings.titleBarInactiveForeground")}
+                    value={tb.inactiveForegroundColor}
+                    onChange={(v) => save("titleBar.inactiveForegroundColor", v)}
+                  />
+                </div>
+              )}
+
+              <div className="bb-section">
+                <div className="bb-section-title">{t("settings.titleBarBranchSection")}</div>
+                <Toggle
+                  label={t("settings.titleBarShowBranch")}
+                  help={t("settings.titleBarShowBranchHint")}
+                  value={tb.showBranch}
+                  onChange={(v) => save("titleBar.showBranch", v)}
+                />
+                {tb.showBranch && (
+                  <div className="bb-field">
+                    <label>{t("settings.titleBarBranchSeparator")}</label>
+                    <input
+                      className="bb-input bb-mono"
+                      style={{ width: 120 }}
+                      defaultValue={tb.branchSeparator}
+                      onBlur={(e) => save("titleBar.branchSeparator", e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="bb-section">
+                <div className="bb-section-title">{t("settings.branchButtonSection")}</div>
+                <p style={{ fontSize: 12, color: "var(--bb-muted)", margin: "0 0 8px" }}>
+                  {t("settings.branchButtonHint")}
+                </p>
+                <Toggle
+                  label={t("settings.branchButtonEnabled")}
+                  value={tb.branchButtonEnabled}
+                  onChange={(v) => save("titleBar.branchButtonEnabled", v)}
+                />
+                {tb.branchButtonEnabled && (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "flex-end", padding: "4px 0 8px" }}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          padding: "2px 8px",
+                          borderRadius: 4,
+                          fontSize: 12,
+                          fontFamily: "var(--vscode-font-family, sans-serif)",
+                          color: tb.branchButtonColor,
+                          background: BRANCH_BUTTON_PREVIEW_BG[tb.branchButtonBackground],
+                        }}
+                      >
+                        ⎇ feature/login
+                      </span>
+                    </div>
+                    <ColorField
+                      label={t("settings.branchButtonColor")}
+                      value={tb.branchButtonColor}
+                      onChange={(v) => save("titleBar.branchButtonColor", v)}
+                    />
+                    <div className="bb-field">
+                      <label>{t("settings.branchButtonBackground")}</label>
+                      <div className="bb-color-swatches" style={{ flexWrap: "wrap" }}>
+                        {BRANCH_BUTTON_BACKGROUNDS.map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            className={`bb-btn ghost sm ${tb.branchButtonBackground === key ? "active" : ""}`}
+                            onClick={() => save("titleBar.branchButtonBackground", key)}
+                          >
+                            {t(`settings.branchButtonBg.${key}`)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+
           {tab === "notifications" && (
             <>
               <Toggle
@@ -719,27 +1176,40 @@ export function SettingsDrawer(props: Props) {
           )}
 
           {tab === "ai" && (
-            <div className="bb-field">
-              <label>{t("settings.aiTemplate")}</label>
-              <textarea
-                className="bb-input bb-mono"
-                rows={14}
-                defaultValue={appConfig.aiPromptTemplate}
-                placeholder={t("settings.aiTemplateHint")}
-                onBlur={(e) => save("aiPromptTemplate", e.target.value)}
-              />
-              <span className="bb-muted small">{t("settings.aiTemplateHint")}</span>
-            </div>
+            <>
+              <div className="bb-field">
+                <label className="bb-label-help">
+                  {t("settings.aiAgentsModelsTitle")}
+                  <HelpIcon text={t("tooltips.settings.aiAgentsModels")} />
+                </label>
+                <span className="bb-muted small">{t("settings.aiAgentsModelsHint")}</span>
+                {(appConfig.aiAgents ?? []).length === 0 ? (
+                  <span className="bb-muted small">{t("settings.aiAgentsNoAgents")}</span>
+                ) : (
+                  (appConfig.aiAgents ?? []).map((agent) => (
+                    <AIAgentModelsEditor
+                      key={agent.id}
+                      agent={agent}
+                      fetchResult={props.aiAgentModelsByAgent[agent.id]}
+                      onListModels={() => props.onListAIAgentModels(agent.id)}
+                      allAgents={appConfig.aiAgents ?? []}
+                      onSaveAgents={(next) => props.onSave({ aiAgents: next })}
+                    />
+                  ))
+                )}
+              </div>
+            </>
           )}
-        </div>
+          </div>
 
-        <div className="bb-drawer-foot">
-          <span className="bb-muted small">{t("app.tagline")}</span>
-          <button className="bb-btn" onClick={props.onClose}>
-            {t("settings.close")}
-          </button>
+          <div className="bb-drawer-foot">
+            <span className="bb-muted small">{t("app.tagline")}</span>
+            <button className="bb-btn" onClick={props.onClose}>
+              {t("settings.close")}
+            </button>
+          </div>
         </div>
-      </aside>
+      </div>
     </div>
   );
 }

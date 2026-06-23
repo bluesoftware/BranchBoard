@@ -1,70 +1,176 @@
-# Current branch / Aktualny branch
+# Current Branch
 
-The **Current branch** view is the developer's quick work hub. Open it and you
-immediately see everything BranchBoard knows about the branch you're on — without
-hunting for the task on the board.
+Current Branch is the developer's work hub. It shows everything BranchBoard knows
+about the branch currently checked out in the repository.
 
-Widok **Aktualny branch** to szybkie centrum pracy programisty: pokazuje wszystko
-o branchu, na którym jesteś, i powiązanym zadaniu.
+Use it when you are coding and want one answer:
 
-## What it shows
+> What is this branch, what task owns it, what changed and what should I do next?
 
-- Current branch, working-tree state (dirty), ahead/behind main.
-- The linked task (title, status/column, description) or a clear empty state.
-- Changed files vs main (open / compare).
-- Branch commits (`main..branch`).
-- A **suggested next step** based on the real state.
-- A **task flow** pipeline to move the task between stages.
-- Safe actions for the branch.
+## What It Shows
 
-## States
+- current branch,
+- dirty working-tree state,
+- ahead/behind main,
+- linked task or no-task state,
+- task title, description, assignee, checklist and comments,
+- changed files,
+- commits,
+- risk level,
+- work log,
+- deployment state,
+- AI Agent panel,
+- suggested next step,
+- safe actions.
 
-- **On a feature branch with a task** — full task summary, task-flow pipeline,
-  changed files, commits and actions.
-- **Branch without a task** — empty state with *Create task from branch* and
-  *Link branch to existing task*.
-- **On main** — a reminder that main should hold finished work, with shortcuts to
-  the board and Branch Map (no push/finish offered by default).
+## Main States
 
-## Task flow
+### On Main
 
-The pipeline shows your board columns; the current one is highlighted. Clicking a
-stage moves the task there and logs an event. Moving into a "done" column routes
-through the **safe Finish task flow** (it never silently marks done when a branch
-is involved).
+When the current branch is the main branch, Current Branch shows a calm state
+with shortcuts to Board and Branch Map. It does not encourage push/finish from
+main.
 
-## Suggested next step
+### Feature Branch With Linked Task
 
-BranchBoard suggests, never auto-runs: e.g. "push the branch", "deploy to DEV so a
-tester can verify", "this branch looks ready to merge", or "elevated risk — check
-the changed files first".
+This is the full working state:
 
-## Moving changes between branches
+- task context,
+- branch details,
+- actions such as push, deploy, finish, copy prompt,
+- technical details tabs,
+- AI Agent controls.
 
-Code physically belongs to the current Git branch. BranchBoard does **not** move
-individual files between branches automatically. Moving a task between stages
-changes work status and suggests the right Git/deploy action. For actually moving
-local changes elsewhere, use **Copy transfer commands**, which copies a safe,
-reviewable sequence (`git stash` / `git checkout` / `git stash pop`, or a patch) —
-nothing is executed for you.
+### Branch Without Task
+
+BranchBoard offers:
+
+- create task from current branch,
+- link current branch to an existing task.
+
+This is useful when a developer created a branch manually before opening
+BranchBoard.
+
+## Suggested Next Step
+
+BranchBoard suggests the next action based on current state:
+
+- link/create task,
+- commit or clean dirty tree,
+- push branch,
+- check high risk,
+- deploy to DEV,
+- move to review,
+- finish/merge when ready.
+
+The suggestion is advisory. It does not run automatically.
+
+## Technical Detail Tabs
+
+Current Branch can show technical details such as:
+
+- changed files,
+- commits,
+- safety/rollback actions,
+- AI Agent panel when the task is AI-assisted or in the AI column.
+
+Opening files and diffs uses VS Code APIs through BoardPanel.
+
+## Task Flow From This View
+
+The task flow pipeline lets the user move the linked task between board columns.
+
+Moving a task can trigger the same safeguards as dragging on the board:
+
+- WIP confirmation,
+- column hooks,
+- Git stage automation,
+- finish flow for production,
+- rollback if a blocking step fails.
+
+## AI Agent In Current Branch
+
+The same AI panel used in the task drawer is available here when relevant.
+
+It can:
+
+- generate prompt,
+- run Plan,
+- run Work,
+- run Review,
+- show live logs,
+- stop active run,
+- store usage/cost/result history.
+
+This keeps AI context close to the actual branch instead of hiding it in a
+separate chat.
+
+## Moving Changes Between Branches
+
+BranchBoard does not move individual files between Git branches automatically.
+
+For local uncommitted changes, Current Branch can copy safe transfer commands for
+the user to review:
+
+```bash
+git stash
+git checkout <target-branch>
+git stash pop
+```
+
+or a patch-based approach:
+
+```bash
+git diff > branchboard-transfer.patch
+```
+
+Nothing is executed automatically.
+
+## Workflow Stage Vs Branch Location
+
+There are two different concepts:
+
+### Workflow Stage
+
+The board column says where the task is intended to be in the process:
+
+```text
+none -> feature -> review -> staging -> production
+```
+
+This is set by moving the task.
+
+### Branch Location
+
+The branch location badge says where the code actually is:
+
+- `local`,
+- `origin`,
+- `dev`,
+- `prod`.
+
+This is computed from Git on demand and is not persisted.
+
+If the two disagree, trust the Git-truth badge and investigate why the board
+column is stale.
 
 ## Safety
 
-No destructive operations run automatically. Reset --hard, force push, delete
-branch, rebase, merge to main and production deploy all require their own
-confirmed flows.
+Current Branch does not run destructive operations automatically.
 
-## Task flow stage vs. branch location — two different things
+Actions that need confirmation keep their confirmation:
 
-This view's **task flow** pipeline (and the `GitStage` shown on the board:
-`none → feature → review → staging → production`) is a *workflow-intent*
-signal — it reflects which column the task sits in, set by moving the card.
+- merge to main,
+- production deploy,
+- delete branch,
+- force delete,
+- archive,
+- revert,
+- update branch from main when needed.
 
-The **branch location badge** in the task drawer (`local / origin / dev /
-prod`, see [AI_WORKFLOW.md](./AI_WORKFLOW.md#branch-location-badges-local--origin--dev--prod))
-is a *Git-truth* signal — it's recomputed live from the branch itself and
-can never be out of sync with reality, because nothing sets it directly.
+Related docs:
 
-In practice they usually agree (a task in "Do testu" with a branch merged
-into `dev` will show both), but the badge is the one to trust if they ever
-diverge — e.g. someone merged or pushed outside of BranchBoard.
+- [WORKFLOW.md](WORKFLOW.md)
+- [SAFETY.md](SAFETY.md)
+- [AI_WORKFLOW.md](AI_WORKFLOW.md)
+- [ROLLBACK_SAFETY.md](ROLLBACK_SAFETY.md)

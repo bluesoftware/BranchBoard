@@ -9,12 +9,18 @@ import {
   BranchMapGraph,
   CommitDetail,
   ConnectionTestResult,
+  CursorSubAgentInfo,
   DashboardData,
   FileMentionEntry,
   GitInfo,
+  AIAgentLogPayload,
+  AIAgentLifecyclePayload,
+  AIAgentModelsResultPayload,
+  AIAgentRunKind,
   TaskBranchStatePayload,
   TaskVerificationResultPayload,
   UserFilter,
+  AiCostDecisionPayload,
 } from "./types";
 import { post, vscode } from "./vscode";
 import { useToast } from "./toast";
@@ -75,6 +81,20 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     showPriority: true,
     reduceAnimations: false,
   },
+  titleBar: {
+    enabled: false,
+    preset: "default",
+    backgroundColor: "#1f1f1f",
+    foregroundColor: "#cccccc",
+    borderColor: "#000000",
+    inactiveBackgroundColor: "#181818",
+    inactiveForegroundColor: "#6b6b6b",
+    showBranch: true,
+    branchSeparator: "  ⎇ ",
+    branchButtonEnabled: true,
+    branchButtonColor: "#ffffff",
+    branchButtonBackground: "prominent",
+  },
   notifications: {
     enabled: true,
     showToast: true,
@@ -98,6 +118,26 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     linkLabel: "",
     severity: "info",
   },
+  aiAgents: [
+    {
+      id: "cursor-agent",
+      name: "Cursor Agent",
+      command: "cursor-agent",
+      args: ["-p", "{{prompt}}", "--output-format", "json"],
+      enabled: true,
+      allowModels: true,
+      models: ["auto", "sonnet", "opus", "gpt-5", "gpt-5-codex"],
+    },
+    {
+      id: "claude-cli",
+      name: "Claude CLI",
+      command: "claude",
+      args: ["{{prompt}}"],
+      enabled: false,
+      allowModels: true,
+      models: ["auto", "sonnet", "opus"],
+    },
+  ],
   soundFiles: {},
   policy: {
     allowDirectMergeToMain: false,
@@ -130,6 +170,24 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     devBranch: "dev",
     runGitActionsOnMove: true,
     confirmGitActionsOnMove: true,
+    enableAIAgentColumn: true,
+    aiAgentColumnId: "ai-agent",
+    requireConfirmationBeforeAIAgentRun: true,
+    requireCleanTreeBeforeAIAgentRun: true,
+    aiAgentTimeoutSeconds: 900,
+    allowedAIAgentCommands: ["cursor-agent", "claude", "node", "npm", "pnpm"],
+    defaultAIBranchPrefix: "ai/",
+    moveToLocalAfterAIAgentSuccess: true,
+    aiCostMode: "auto",
+    aiLocalOptimizerEnabled: false,
+    aiLocalOptimizerProvider: "local-command",
+    aiCli: {
+      defaultContextLevel: "normal",
+      requireConfirmForFullContext: true,
+      maxFilesInContext: 12,
+      maxPromptChars: 60000,
+      expensiveModelsRequireConfirm: true,
+    },
   },
 };
 
@@ -167,10 +225,27 @@ export function App() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionTestResult | null>(null);
   const [connectionTesting, setConnectionTesting] = useState(false);
   const [fileSuggestions, setFileSuggestions] = useState<FileMentionEntry[]>([]);
+  const [cursorAgents, setCursorAgents] = useState<CursorSubAgentInfo[]>([]);
+  // Per-agent results of the last "list models from CLI" request, keyed by
+  // agentId — drives the refresh button + missing-price hint in the
+  // settings AI-agents section. Absent entry = never requested this session.
+  const [aiAgentModelsByAgent, setAiAgentModelsByAgent] = useState<Record<string, AIAgentModelsResultPayload>>({});
   const [branchMapGraph, setBranchMapGraph] = useState<BranchMapGraph | null>(null);
   const [branchMapGraphLoading, setBranchMapGraphLoading] = useState(false);
   const [commitDetail, setCommitDetail] = useState<CommitDetail | null>(null);
   const [commitDetailLoading, setCommitDetailLoading] = useState(false);
+  /**
+   * Live AI agent console state, per task. This is intentionally NOT part of
+   * `board` — it's a transient, in-memory log of stdout/stderr chunks
+   * streamed from the extension while an agent runs (see AIAgentService.run
+   * + BoardPanel.runAIAgentWorkflow), so it never gets written to
+   * board.json and never survives a webview reload.
+   */
+  const [aiAgentLogs, setAiAgentLogs] = useState<Record<string, AIAgentLogPayload[]>>({});
+  /** taskId -> which kind of run is currently in flight. Absence = not running. This is the authoritative "agent busy" signal for disabling buttons, independent of the persisted aiAgents.status. */
+  const [aiAgentRunning, setAiAgentRunning] = useState<Record<string, AIAgentRunKind>>({});
+  /** taskId -> latest AI Cost Guard decision for that task's AI Agent chat. Transient — refreshed on every "getAiCostDecision" round trip. */
+  const [aiCostDecisions, setAiCostDecisions] = useState<Record<string, AiCostDecisionPayload>>({});
 
   setLanguage(appConfig.language);
   const pushToast = useToast();
@@ -214,6 +289,16 @@ export function App() {
         case "fileList":
           setFileSuggestions((msg.payload?.files as FileMentionEntry[]) ?? []);
           break;
+        case "cursorAgents":
+          setCursorAgents((msg.payload?.agents as CursorSubAgentInfo[]) ?? []);
+          break;
+        case "aiAgentModelsResult": {
+          const p = msg.payload as AIAgentModelsResultPayload;
+          if (p?.agentId) {
+            setAiAgentModelsByAgent((prev) => ({ ...prev, [p.agentId]: p }));
+          }
+          break;
+        }
         case "branchMapGraph":
           setBranchMapGraph(msg.payload as BranchMapGraph);
           setBranchMapGraphLoading(false);
@@ -246,6 +331,11 @@ export function App() {
           pushToast(r.ok ? "success" : "error", r.message, r.detail);
           break;
         }
+        case "aiCostDecision": {
+          const p = msg.payload as AiCostDecisionPayload;
+          setAiCostDecisions((prev) => ({ ...prev, [p.taskId]: p }));
+          break;
+        }
         case "toast": {
           const p = msg.payload as {
             kind: "success" | "error" | "warning" | "info";
@@ -253,6 +343,41 @@ export function App() {
             detail?: string;
           };
           pushToast(p.kind, p.text, p.detail);
+          break;
+        }
+        case "aiAgentLog": {
+          const p = msg.payload as AIAgentLogPayload;
+          if (!p?.taskId) {
+            break;
+          }
+          setAiAgentLogs((prev) => {
+            const existing = prev[p.taskId] ?? [];
+            // Cap at the last 2000 chunks per task so a very chatty/long-running
+            // agent can't grow this unbounded in memory — plenty for a scrolling console.
+            const next = [...existing, p].slice(-2000);
+            return { ...prev, [p.taskId]: next };
+          });
+          break;
+        }
+        case "aiAgentLifecycle": {
+          const p = msg.payload as AIAgentLifecyclePayload;
+          if (!p?.taskId) {
+            break;
+          }
+          setAiAgentRunning((prev) => {
+            const next = { ...prev };
+            if (p.phase === "started") {
+              next[p.taskId] = p.kind;
+            } else {
+              delete next[p.taskId];
+            }
+            return next;
+          });
+          if (p.phase === "started") {
+            // Fresh console for every new run, so old output from a previous
+            // run doesn't linger above the new run's output.
+            setAiAgentLogs((prev) => ({ ...prev, [p.taskId]: [] }));
+          }
           break;
         }
         case "notification":
@@ -329,7 +454,10 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName);
+      const typing =
+        ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName) ||
+        !!target?.isContentEditable ||
+        !!target?.closest?.('[contenteditable="true"]');
       if (e.key === "Escape") {
         setActiveTaskId(null);
         setSettingsOpen(false);
@@ -635,6 +763,8 @@ export function App() {
           post("testConnection");
         }}
         onShowLogs={() => post("showLogs")}
+        aiAgentModelsByAgent={aiAgentModelsByAgent}
+        onListAIAgentModels={(agentId) => post("listAIAgentModels", { agentId })}
       />
     </Suspense>
   );
@@ -702,6 +832,17 @@ export function App() {
           verificationResult={activeVerificationResult}
           verificationRunning={verificationRunning}
           onRunVerification={() => runTaskVerification(activeTask.id)}
+          onGenerateAIAgentPrompt={() => post("generateAIAgentPrompt", { taskId: activeTask.id })}
+          onRunAIAgentPlan={() => post("runAIAgentPlan", { taskId: activeTask.id })}
+          onRunAIAgent={() => post("runAIAgent", { taskId: activeTask.id })}
+          onRunAIAgentReview={() => post("runAIAgentReview", { taskId: activeTask.id })}
+          onAcceptAIAgentResult={() => post("acceptAIAgentResult", { taskId: activeTask.id })}
+          onRejectAIAgentResult={() => post("rejectAIAgentResult", { taskId: activeTask.id })}
+          onCancelAIAgent={() => post("cancelAIAgent", { taskId: activeTask.id })}
+          aiAgentLog={aiAgentLogs[activeTask.id] ?? []}
+          aiAgentRunningKind={aiAgentRunning[activeTask.id] ?? null}
+          aiCostDecision={aiCostDecisions[activeTask.id] ?? null}
+          onRequestAiCostDecision={(req) => post("getAiCostDecision", { taskId: activeTask.id, ...req })}
           events={board.events}
           branchCommits={activeBranchCommits}
           branchFiles={activeBranchFiles}
@@ -750,6 +891,8 @@ export function App() {
           onOpenDiff={(path) => post("openDiff", { branchName: activeTask.branchName, path })}
           fileSuggestions={fileSuggestions}
           onSearchFiles={(query) => post("searchFiles", { query })}
+          cursorAgents={cursorAgents}
+          onRefreshCursorAgents={() => post("getCursorAgents", { refresh: true })}
         />
       </Suspense>
     );
@@ -986,6 +1129,28 @@ export function App() {
             onOpenDiff={(branchName, path) => post("openDiff", { branchName, path })}
             onCheckout={(branchName) => post("checkoutBranch", { branchName })}
             onUpdateFromMain={() => post("updateBranchFromMain", { strategy: appConfig.policy.updateBranchStrategy })}
+            cursorAgents={cursorAgents}
+            aiAgentLogs={aiAgentLogs}
+            aiAgentRunning={aiAgentRunning}
+            aiCostDecisions={aiCostDecisions}
+            onRequestAiCostDecision={(taskId, req) => post("getAiCostDecision", { taskId, ...req })}
+            onSaveTask={(taskId, patch) => post("updateTask", { id: taskId, patch })}
+            onGenerateAIAgentPrompt={(taskId) => post("generateAIAgentPrompt", { taskId })}
+            onRunAIAgentPlan={(taskId) => post("runAIAgentPlan", { taskId })}
+            onRunAIAgent={(taskId) => post("runAIAgent", { taskId })}
+            onRunAIAgentReview={(taskId) => post("runAIAgentReview", { taskId })}
+            onAcceptAIAgentResult={(taskId) => post("acceptAIAgentResult", { taskId })}
+            onRejectAIAgentResult={(taskId) => post("rejectAIAgentResult", { taskId })}
+            onCancelAIAgent={(taskId) => post("cancelAIAgent", { taskId })}
+            onAiPromptCopied={(taskId) =>
+              post("logEvent", {
+                type: "ai_prompt_copied",
+                taskId,
+                branchName: board.tasks.find((x) => x.id === taskId)?.branchName || null,
+                payload: { title: board.tasks.find((x) => x.id === taskId)?.title },
+              })
+            }
+            onRefreshCursorAgents={() => post("getCursorAgents", { refresh: true })}
           />
         </Suspense>
         {renderAdminAnnouncement()}
