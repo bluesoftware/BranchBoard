@@ -289,6 +289,8 @@ export interface BoardTask {
   /** User who created the task. Optional for boards created before this field existed. */
   createdByUserId?: string | null;
   branchName: string;
+  /** True only for the single task currently driving the shared DEV branch. */
+  isDevActive?: boolean;
   priority: TaskPriority;
   /** Type of work; determines the branch prefix. Defaults to "feature". */
   taskType?: TaskType;
@@ -1166,6 +1168,8 @@ export type InboundMessageType =
   | "getCommitDetail"
   | "openCommitDiff"
   | "updateBranchFromMain"
+  | "resetDevBranch"
+  | "setDevActiveTask"
   | "openExternal"
   | "deployDev"
   | "deployProduction"

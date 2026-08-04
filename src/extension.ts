@@ -539,11 +539,11 @@ async function selectSshKey() {
     value = uris[0].fsPath;
   }
 
-  // Saved per-project (Workspace -> .vscode/settings.json) so it sticks across
-  // restarts together with the rest of the BranchBoard config for this repo.
+  // Saved globally so BranchBoard keeps one user-level SSH preference instead
+  // of rewriting each workspace's `.vscode/settings.json`.
   await vscode.workspace
     .getConfiguration("branchBoard")
-    .update("sshKeyPath", value, vscode.ConfigurationTarget.Workspace);
+    .update("sshKeyPath", value, vscode.ConfigurationTarget.Global);
   vscode.window.showInformationMessage(
     value ? `BranchBoard: using SSH key ${value}` : "BranchBoard: cleared SSH key (using default)."
   );

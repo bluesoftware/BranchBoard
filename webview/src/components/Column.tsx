@@ -26,6 +26,7 @@ interface Props {
   onRenameColumn: (id: string, name: string) => void;
   onDeleteColumn: (id: string) => void;
   onConfigureColumn: (id: string) => void;
+  onResetDevBranch: (columnId: string) => void;
   onTaskDragStart: (taskId: string) => void;
   onTaskDragEnd: () => void;
   onTaskDragOver: (index: number) => void;
@@ -74,6 +75,11 @@ export function Column(props: Props) {
   };
 
   const placeholder = <div className="bb-drop-placeholder" />;
+  const devBranch = (props.appConfig.policy.devBranch || "dev").trim().toLowerCase();
+  const isDevColumn =
+    column.gitStage === "staging" &&
+    (((column.targetBranch || "").trim().toLowerCase() === devBranch) ||
+      /\bdev\b/.test(`${column.id} ${column.name} ${column.nameEn ?? ""}`.toLowerCase()));
 
   return (
     <section
@@ -166,6 +172,17 @@ export function Column(props: Props) {
               >
                 {t("column.configure")}
               </button>
+              {isDevColumn && (
+                <button
+                  className="bb-menu-item"
+                  onClick={() => {
+                    props.onResetDevBranch(column.id);
+                    setMenuOpen(false);
+                  }}
+                >
+                  {t("column.resetDev")}
+                </button>
+              )}
               <div className="bb-menu-sep" />
               <button
                 className="bb-menu-item danger"

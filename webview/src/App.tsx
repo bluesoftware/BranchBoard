@@ -554,11 +554,7 @@ export function App() {
       if (!col) {
         return false;
       }
-      return (
-        col.gitStage === "production" ||
-        col.id === "done" ||
-        /zrobione|gotowe|\bdone\b|ukończ|ukoncz|produkc/i.test(col.name)
-      );
+      return col.id === "done" || /zrobione|gotowe|\bdone\b|ukończ|ukoncz/i.test(col.name);
     },
     [board]
   );
@@ -871,6 +867,11 @@ export function App() {
               branchName,
               taskId: activeTask.id,
             })
+          }
+          onSetDevActive={(active) =>
+            active
+              ? post("setDevActiveTask", { taskId: activeTask.id })
+              : post("updateTask", { id: activeTask.id, patch: { isDevActive: false } })
           }
           onFinishTask={() => post("finishTask", { taskId: activeTask.id })}
           onMergeToMain={() => post("mergeToMain", { taskId: activeTask.id })}
@@ -1244,6 +1245,7 @@ export function App() {
           onRenameColumn={(id, name) => post("renameColumn", { id, name })}
           onDeleteColumn={(id) => post("deleteColumn", { id })}
           onConfigureColumn={(id) => setConfigColumnId(id)}
+          onResetDevBranch={(columnId) => post("resetDevBranch", { columnId })}
           onMoveColumn={(orderedIds) => post("moveColumn", { orderedIds })}
           onToggleDone={(task) =>
             post("updateTask", {

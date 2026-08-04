@@ -80,6 +80,7 @@ interface Props {
   onCheckoutBranch: (branchName: string) => void;
   onPushBranch: (branchName: string) => void;
   onUpdateFromMain: (branchName: string) => void;
+  onSetDevActive: (active: boolean) => void;
   onFinishTask: () => void;
   onMergeToMain: () => void;
   onCopyClipboard: (text: string, label: string) => void;
@@ -300,6 +301,13 @@ export function TaskDrawer(props: Props) {
   ].join("\n");
 
   const currentColumn = board.columns.find((c) => c.id === task.columnId) ?? null;
+  const devBranch = (policy.devBranch || "dev").trim().toLowerCase();
+  const isDevColumn =
+    !!currentColumn &&
+    currentColumn.gitStage === "staging" &&
+    (((currentColumn.targetBranch || "").trim().toLowerCase() === devBranch) ||
+      /\bdev\b/.test(`${currentColumn.id} ${currentColumn.name} ${currentColumn.nameEn ?? ""}`.toLowerCase()));
+  const canSetDevActive = isDevColumn && !!branchName.trim();
   const checklistDone = checklist.filter((item) => item.done).length;
   const statusLabel =
     task.status === "done"
@@ -649,6 +657,22 @@ export function TaskDrawer(props: Props) {
                 <dt>{t("task.gitBranch")}</dt>
                 <dd>{branchName || "—"}</dd>
               </dl>
+            )}
+
+            {isDevColumn && (
+              <div className="bb-toggle-row">
+                <label className="bb-label-help">
+                  {t("task.devActive")}
+                  <Help text={t("task.devActiveHint")} />
+                </label>
+                <button
+                  className={`bb-switch ${task.isDevActive ? "on" : ""}`}
+                  onClick={() => canSetDevActive && props.onSetDevActive(!task.isDevActive)}
+                  aria-pressed={!!task.isDevActive}
+                  disabled={!canSetDevActive}
+                  title={!canSetDevActive ? t("task.devActiveRequiresBranch") : t("task.devActiveHint")}
+                />
+              </div>
             )}
 
             <div className="bb-git-actions">

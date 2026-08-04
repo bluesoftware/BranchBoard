@@ -60,7 +60,8 @@
     "delete": "Usuń kolumnę",
     "menu": "Menu kolumny",
     "notEmpty": "Kolumna nie jest pusta.",
-    "configure": "Konfiguruj komendy…"
+    "configure": "Konfiguruj komendy…",
+    "resetDev": "Reset DEV do origin/main"
   },
   "gitStage": {
     "none": "Bez brancha",
@@ -183,6 +184,9 @@
     "onThisBranch": "Jesteś na tym branchu.",
     "branchDiffers": "Bieżący branch różni się od brancha zadania.",
     "uncommitted": "Masz niezacommitowane zmiany.",
+    "devActive": "Aktywny DEV",
+    "devActiveHint": "Ten task aktualnie steruje gałęzią dev. Włączenie utworzy backup, ustawi dev dokładnie na commit tego brancha i wypchnie zmianę force-with-lease.",
+    "devActiveRequiresBranch": "Najpierw przypisz branch do zadania, aby ustawić aktywny DEV.",
     "production": {
       "productionServerRollback": "Na serwerze produkcyjnym z lokalnym SQLite nie można cofać zadań z Produkcji. Cofnij je z lokalnego klienta po SSH, wtedy BranchBoard przełączy branch zadania.",
       "productionChecklistIncomplete": "Nie można przenieść zadania na Produkcję, dopóki wszystkie podzadania nie są zakończone.",

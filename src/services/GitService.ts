@@ -98,6 +98,52 @@ export class GitService {
     return this.run(["-c", "merge.autoStash=false", "merge", "--ff-only", `${remote}/${branch}`]);
   }
 
+  private timestampToken(): string {
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return [
+      now.getFullYear(),
+      pad(now.getMonth() + 1),
+      pad(now.getDate()),
+      "-",
+      pad(now.getHours()),
+      pad(now.getMinutes()),
+      pad(now.getSeconds()),
+    ].join("");
+  }
+
+  private async ensureBranchFromSeed(branchName: string, seedBranch: string): Promise<OperationResult> {
+    const action = "ensureBranch";
+    const remote = this.getConfig().remoteName || "origin";
+    try {
+      await this.assertValidBranchName(branchName);
+      await this.assertValidBranchName(seedBranch);
+      if (await this.localBranchExists(branchName)) {
+        await this.run(["checkout", branchName]);
+        return { ok: true, action, message: `Switched to '${branchName}'.` };
+      }
+      try {
+        await this.run(["fetch", remote, `refs/heads/${branchName}:refs/remotes/${remote}/${branchName}`]);
+      } catch {
+        /* offline or branch does not exist remotely */
+      }
+      if (await this.remoteBranchExists(branchName)) {
+        await this.run(["checkout", "-b", branchName, "--track", `${remote}/${branchName}`]);
+        return { ok: true, action, message: `Created '${branchName}' tracking ${remote}/${branchName}.` };
+      }
+      await this.run(["checkout", seedBranch]);
+      try {
+        await this.fastForwardFromRemote(remote, seedBranch);
+      } catch {
+        /* seed branch may have no upstream yet */
+      }
+      await this.run(["checkout", "-b", branchName]);
+      return { ok: true, action, message: `Created new branch '${branchName}' from '${seedBranch}'.` };
+    } catch (err: any) {
+      return { ok: false, action, message: `Could not create or switch to '${branchName}'.`, detail: err?.message };
+    }
+  }
+
   /** Validate a branch name with git's own checker; rejects unsafe input. */
   private async assertValidBranchName(name: string): Promise<void> {
     const trimmed = (name || "").trim();
@@ -1577,6 +1623,107 @@ export class GitService {
         ok: false,
         action: "createBackupBranch",
         message: `Could not create backup branch '${backupName}'.`,
+        detail: err?.message,
+      };
+    }
+  }
+
+  async activateTaskBranchOnDev(taskBranch: string): Promise<OperationResult> {
+    const action = "activateTaskBranchOnDev";
+    const remote = this.getConfig().remoteName || "origin";
+    const devBranch = (this.getConfig().devBranch || "dev").trim() || "dev";
+    const main = await this.getMainBranch();
+    const original = await this.getCurrentBranch();
+    try {
+      await this.assertValidBranchName(taskBranch);
+      await this.assertValidBranchName(devBranch);
+      const dirty = await this.requireCleanWorkingTree(
+        action,
+        `Working tree is not clean. Commit or stash changes before activating '${taskBranch}' on '${devBranch}'.`
+      );
+      if (dirty) {
+        return dirty;
+      }
+      await this.run(["fetch", remote]);
+      const ensuredTask = await this.ensureBranch(taskBranch);
+      if (!ensuredTask.ok) {
+        return { ...ensuredTask, action };
+      }
+      const ensuredDev = await this.ensureBranchFromSeed(devBranch, main);
+      if (!ensuredDev.ok) {
+        return { ...ensuredDev, action };
+      }
+      const backup = `backup/dev-before-activate-${this.timestampToken()}`;
+      const backupRes = await this.createBackupBranch(backup, devBranch);
+      if (!backupRes.ok) {
+        return { ...backupRes, action };
+      }
+      await this.run(["reset", "--hard", taskBranch]);
+      await this.run(["push", "--force-with-lease", "-u", remote, devBranch]);
+      if (devBranch !== taskBranch) {
+        await this.run(["checkout", taskBranch]);
+      }
+      return {
+        ok: true,
+        action,
+        message: `Activated '${taskBranch}' on '${devBranch}'. Backup: '${backup}'.`,
+      };
+    } catch (err: any) {
+      if (original) {
+        await this.run(["checkout", original]).catch(() => undefined);
+      }
+      return {
+        ok: false,
+        action,
+        message: `Could not activate '${taskBranch}' on '${devBranch}'.`,
+        detail: err?.message,
+      };
+    }
+  }
+
+  async resetDevBranchToMain(): Promise<OperationResult> {
+    const action = "resetDevBranchToMain";
+    const remote = this.getConfig().remoteName || "origin";
+    const devBranch = (this.getConfig().devBranch || "dev").trim() || "dev";
+    const main = await this.getMainBranch();
+    const original = await this.getCurrentBranch();
+    try {
+      await this.assertValidBranchName(devBranch);
+      const dirty = await this.requireCleanWorkingTree(
+        action,
+        `Working tree is not clean. Commit or stash changes before resetting '${devBranch}' to ${remote}/${main}.`
+      );
+      if (dirty) {
+        return dirty;
+      }
+      await this.run(["fetch", remote]);
+      const ensuredDev = await this.ensureBranchFromSeed(devBranch, main);
+      if (!ensuredDev.ok) {
+        return { ...ensuredDev, action };
+      }
+      const backup = `backup/dev-before-main-sync-${this.timestampToken()}`;
+      const backupRes = await this.createBackupBranch(backup, devBranch);
+      if (!backupRes.ok) {
+        return { ...backupRes, action };
+      }
+      await this.run(["reset", "--hard", `${remote}/${main}`]);
+      await this.run(["push", "--force-with-lease", "-u", remote, devBranch]);
+      if (original && original !== devBranch) {
+        await this.run(["checkout", original]).catch(() => undefined);
+      }
+      return {
+        ok: true,
+        action,
+        message: `Reset '${devBranch}' to ${remote}/${main}. Backup: '${backup}'.`,
+      };
+    } catch (err: any) {
+      if (original) {
+        await this.run(["checkout", original]).catch(() => undefined);
+      }
+      return {
+        ok: false,
+        action,
+        message: `Could not reset '${devBranch}' to ${remote}/${main}.`,
         detail: err?.message,
       };
     }

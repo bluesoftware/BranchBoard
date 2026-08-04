@@ -224,6 +224,8 @@ export interface BoardTask {
   assignedUserId: string | null;
   createdByUserId?: string | null;
   branchName: string;
+  /** True only for the single task currently driving the shared DEV branch. */
+  isDevActive?: boolean;
   priority: TaskPriority;
   taskType?: TaskType;
   comments: TaskComment[];

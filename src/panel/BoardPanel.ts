@@ -346,7 +346,7 @@ export class WebviewController {
     ) {
       void vscode.workspace
         .getConfiguration("branchBoard")
-        .update("currentUser", currentUserId, vscode.ConfigurationTarget.Workspace);
+        .update("currentUser", currentUserId, vscode.ConfigurationTarget.Global);
     }
   }
 
@@ -1242,6 +1242,20 @@ export class WebviewController {
     return col.gitStage === "production" || /produkc|production/.test(key);
   }
 
+  private isDevColumnId(columnId: string | null | undefined): boolean {
+    if (!columnId) {
+      return false;
+    }
+    const cfg = this.deps.getConfig();
+    const col = this.deps.board.getColumn(columnId);
+    if (!col || col.gitStage !== "staging") {
+      return false;
+    }
+    const key = `${col.id} ${col.name} ${col.nameEn ?? ""}`.toLowerCase();
+    const devBranch = (cfg.devBranch || "dev").trim().toLowerCase();
+    return (col.targetBranch || "").trim().toLowerCase() === devBranch || /\bdev\b/.test(key);
+  }
+
   private isProductionSqliteServer(): boolean {
     const cfg = this.deps.getConfig();
     return (
@@ -1323,6 +1337,78 @@ export class WebviewController {
     this.toast(res);
     await this.postGitInfo();
     return true;
+  }
+
+  private async activateDevTask(
+    msg: InboundMessage,
+    taskId: string,
+    columnId: string
+  ): Promise<OperationResult | undefined> {
+    const { board, git, getConfig } = this.deps;
+    const task = board.getBoard().tasks.find((candidate) => candidate.id === taskId);
+    if (!task) {
+      return undefined;
+    }
+    const branch = (task.branchName || "").trim();
+    if (!branch) {
+      const res = { ok: false, action: "activateTaskBranchOnDev", message: "Task has no branch — DEV cannot be activated." };
+      this.reply(msg, res);
+      this.toast(res);
+      return res;
+    }
+    if (!this.isDevColumnId(columnId)) {
+      const res = { ok: false, action: "activateTaskBranchOnDev", message: "This task is not in the DEV column." };
+      this.reply(msg, res);
+      this.toast(res);
+      return res;
+    }
+    const devBranch = (getConfig().devBranch || "dev").trim() || "dev";
+    const confirmed = await this.confirmGit(
+      `Set '${devBranch}' exactly to '${branch}'?`,
+      "BranchBoard will create a backup branch, hard-reset dev to this task branch and force-push with lease."
+    );
+    if (!confirmed) {
+      const res = { ok: false, action: "activateTaskBranchOnDev", message: "DEV activation cancelled." };
+      this.reply(msg, res);
+      return res;
+    }
+    const res = await git.activateTaskBranchOnDev(branch);
+    if (res.ok) {
+      await board.setDevActiveTask(taskId, columnId);
+    }
+    this.reply(msg, res);
+    this.toast(res);
+    await this.postGitInfo();
+    return res;
+  }
+
+  private async resetDevBranch(
+    msg: InboundMessage,
+    columnId: string
+  ): Promise<OperationResult | undefined> {
+    const { board, git, getConfig } = this.deps;
+    if (!this.isDevColumnId(columnId)) {
+      return undefined;
+    }
+    const devBranch = (getConfig().devBranch || "dev").trim() || "dev";
+    const mainBranch = await git.getMainBranch();
+    const confirmed = await this.confirmGit(
+      `Reset '${devBranch}' to 'origin/${mainBranch}'?`,
+      "BranchBoard will create a backup branch, hard-reset dev to origin/main and force-push with lease."
+    );
+    if (!confirmed) {
+      const res = { ok: false, action: "resetDevBranchToMain", message: "DEV reset cancelled." };
+      this.reply(msg, res);
+      return res;
+    }
+    const res = await git.resetDevBranchToMain();
+    if (res.ok) {
+      await board.clearDevActiveForColumn(columnId);
+    }
+    this.reply(msg, res);
+    this.toast(res);
+    await this.postGitInfo();
+    return res;
   }
 
   /** Run the safe finish flow for a task and apply its board side-effects. */
@@ -1461,6 +1547,9 @@ export class WebviewController {
     }
 
     if (stage === "staging") {
+      if (this.isDevColumnId(toColumnId)) {
+        return this.activateDevTask(msg, taskId, toColumnId);
+      }
       if (!task.branchName) {
         const res = { ok: false, action: "mergeIntoBranch", message: "Task has no branch — nothing to merge." };
         this.toast(res);
@@ -1875,6 +1964,22 @@ export class WebviewController {
           this.reply(msg, res);
           this.toast(res);
           await this.postGitInfo();
+          break;
+        }
+
+        case "resetDevBranch": {
+          const columnId = String(msg.payload?.columnId ?? "").trim();
+          await this.resetDevBranch(msg, columnId);
+          break;
+        }
+
+        case "setDevActiveTask": {
+          const taskId = String(msg.payload?.taskId ?? "").trim();
+          const task = board.getBoard().tasks.find((candidate) => candidate.id === taskId);
+          if (!task) {
+            break;
+          }
+          await this.activateDevTask(msg, taskId, task.columnId);
           break;
         }
 
@@ -2524,7 +2629,7 @@ export class WebviewController {
         case "changeUser":
           await vscode.workspace
             .getConfiguration("branchBoard")
-            .update("currentUser", msg.payload.userId, vscode.ConfigurationTarget.Workspace);
+            .update("currentUser", msg.payload.userId, vscode.ConfigurationTarget.Global);
           await this.postGitInfo();
           break;
 
@@ -2714,7 +2819,7 @@ export class WebviewController {
           const patch = (msg.payload?.patch ?? {}) as Record<string, unknown>;
           const cfg = vscode.workspace.getConfiguration("branchBoard");
           for (const [key, value] of Object.entries(patch)) {
-            await cfg.update(key, value, vscode.ConfigurationTarget.Workspace);
+            await cfg.update(key, value, vscode.ConfigurationTarget.Global);
           }
           // onDidChangeConfiguration re-pushes appConfig + gitInfo.
           break;

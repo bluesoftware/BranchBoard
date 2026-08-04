@@ -60,7 +60,8 @@
     "delete": "Delete column",
     "menu": "Column menu",
     "notEmpty": "Column is not empty.",
-    "configure": "Configure commands…"
+    "configure": "Configure commands…",
+    "resetDev": "Reset DEV to origin/main"
   },
   "gitStage": {
     "none": "No branch",
@@ -183,6 +184,9 @@
     "onThisBranch": "You are on this branch.",
     "branchDiffers": "Current branch differs from the task branch.",
     "uncommitted": "You have uncommitted changes.",
+    "devActive": "DEV active",
+    "devActiveHint": "This task currently drives the dev branch. Enabling it creates a backup, sets dev exactly to this branch commit and force-pushes with lease.",
+    "devActiveRequiresBranch": "Link a branch to the task before setting it as the active DEV task.",
     "production": {
       "productionServerRollback": "On the production server with local SQLite, tasks cannot be moved back from Production. Move them from a local SSH client instead; BranchBoard will switch to the task branch there.",
       "productionChecklistIncomplete": "A task cannot be moved to Production until all subtasks are done.",

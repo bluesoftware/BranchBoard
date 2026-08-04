@@ -162,6 +162,11 @@ export function TaskCard({
               {task.branchName.replace(/^feature\//, "")}
             </span>
           )}
+          {task.isDevActive && (
+            <span className="bb-meta-item" title={t("task.devActiveHint")}>
+              {t("task.devActive")}
+            </span>
+          )}
           {isAi && (
             <span className={`bb-meta-item ai-agent ${aiHasWarning ? "warn" : ""}`} title={t("aiAgent.cardHint")}>
               <SparkleIcon size={11} />

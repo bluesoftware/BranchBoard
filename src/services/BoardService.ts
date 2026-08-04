@@ -99,6 +99,7 @@ export class BoardService {
     }));
     board.tasks = (Array.isArray(board.tasks) ? board.tasks : []).map((task) => ({
       ...task,
+      isDevActive: !!task.isDevActive,
       comments: Array.isArray(task.comments) ? task.comments : [],
       checklist: Array.isArray(task.checklist) ? task.checklist : [],
       aiAgents: task.aiAgents
@@ -601,6 +602,43 @@ export class BoardService {
     return tasks.length === 0 ? 1 : Math.max(...tasks.map((t) => t.position)) + 1;
   }
 
+  private setSingleDevActiveInColumn(columnId: string, activeTaskId: string): void {
+    const board = this.getBoard();
+    for (const candidate of board.tasks) {
+      if (candidate.columnId !== columnId) {
+        continue;
+      }
+      candidate.isDevActive = candidate.id === activeTaskId;
+    }
+  }
+
+  async setDevActiveTask(taskId: string, columnId: string): Promise<BoardTask | undefined> {
+    const board = this.getBoard();
+    const task = board.tasks.find((candidate) => candidate.id === taskId);
+    if (!task || task.columnId !== columnId) {
+      return undefined;
+    }
+    this.setSingleDevActiveInColumn(columnId, taskId);
+    task.updatedAt = this.now();
+    await this.persist();
+    return task;
+  }
+
+  async clearDevActiveForColumn(columnId: string): Promise<void> {
+    const board = this.getBoard();
+    let changed = false;
+    for (const task of board.tasks) {
+      if (task.columnId === columnId && task.isDevActive) {
+        task.isDevActive = false;
+        task.updatedAt = this.now();
+        changed = true;
+      }
+    }
+    if (changed) {
+      await this.persist();
+    }
+  }
+
   async createTask(input: Partial<BoardTask> & { title: string; columnId?: string }): Promise<BoardTask> {
     const board = this.getBoard();
     const columnId = input.columnId ?? board.columns[0]?.id ?? "todo";
@@ -614,6 +652,7 @@ export class BoardService {
       assignedUserId: input.assignedUserId ?? null,
       createdByUserId: input.createdByUserId ?? this.currentUserId ?? input.assignedUserId ?? null,
       branchName: input.branchName ?? "",
+      isDevActive: !!input.isDevActive,
       priority: input.priority ?? "none",
       taskType: input.taskType ?? "feature",
       comments: input.comments ?? [],
@@ -639,10 +678,27 @@ export class BoardService {
     if (!task) {
       return undefined;
     }
+    const previousColumnId = task.columnId;
+    const previousBranchName = task.branchName;
+    const nextColumnId = typeof patch.columnId === "string" ? patch.columnId : task.columnId;
     if (patch.ai?.aiChatMessages) {
       patch = { ...patch, ai: { ...patch.ai, aiChatMessages: clampAiChatMessages(patch.ai.aiChatMessages) } };
     }
+    if (previousColumnId !== nextColumnId && !("isDevActive" in patch) && task.isDevActive) {
+      patch = { ...patch, isDevActive: false };
+    }
+    if (
+      typeof patch.branchName === "string" &&
+      patch.branchName.trim() !== previousBranchName.trim() &&
+      !("isDevActive" in patch) &&
+      task.isDevActive
+    ) {
+      patch = { ...patch, isDevActive: false };
+    }
     Object.assign(task, patch, { id: task.id, updatedAt: this.now() });
+    if (task.isDevActive) {
+      this.setSingleDevActiveInColumn(nextColumnId, task.id);
+    }
     await this.persist();
     return task;
   }
@@ -667,6 +723,9 @@ export class BoardService {
     const fromColumnId = task.columnId;
     task.columnId = toColumnId;
     task.updatedAt = this.now();
+    if (fromColumnId !== toColumnId && task.isDevActive) {
+      task.isDevActive = false;
+    }
 
     const reindex = (columnId: string) => {
       const inCol = board.tasks
@@ -688,14 +747,13 @@ export class BoardService {
       reindex(fromColumnId);
     }
 
-    // Auto status when entering the done column.
+    // Auto status only when entering an explicit done column.
     const destCol = board.columns.find((c) => c.id === toColumnId);
     const fromCol = board.columns.find((c) => c.id === fromColumnId);
     const enteringDone =
       !!destCol && (
-        destCol.gitStage === "production" ||
         destCol.id === "done" ||
-        /zrobione|done|produkc/i.test(destCol.name)
+        /zrobione|done/i.test(destCol.name)
       );
     if (enteringDone) {
       task.status = "done";
@@ -1130,17 +1188,13 @@ export class BoardService {
     if (review) {
       return review.id;
     }
-    const done = board.columns.find((c) =>
-      c.gitStage === "production" || c.id === "done" || /zrobione|done|produkc/i.test(c.name)
-    );
+    const done = board.columns.find((c) => c.id === "done" || /zrobione|done/i.test(c.name));
     return done?.id ?? board.columns[board.columns.length - 1]?.id ?? "done";
   }
 
   findDoneColumnId(): string {
     const board = this.getBoard();
-    const done = board.columns.find((c) =>
-      c.gitStage === "production" || c.id === "done" || /zrobione|done|produkc/i.test(c.name)
-    );
+    const done = board.columns.find((c) => c.id === "done" || /zrobione|done/i.test(c.name));
     return done?.id ?? board.columns[board.columns.length - 1]?.id ?? "done";
   }
 

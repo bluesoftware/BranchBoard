@@ -4,7 +4,7 @@ import { Logger } from "./Logger";
 
 /**
  * Applies BranchBoard's `titleBar.*` settings to the VS Code / Cursor chrome:
- *  - colors  -> merged into the workspace's `workbench.colorCustomizations`
+ *  - colors  -> merged into the user's `workbench.colorCustomizations`
  *               (only the keys this service owns; everything else the user
  *               already set there is preserved untouched).
  *  - branch  -> appended to `window.title` using the built-in
@@ -109,7 +109,7 @@ function isHexColor(value: string): boolean {
 export const TitleBarService = {
   /**
    * Apply (or remove) BranchBoard's title bar customization for the current
-   * workspace. Safe to call repeatedly — it's idempotent and only ever
+   * user settings. Safe to call repeatedly — it's idempotent and only ever
    * touches the keys it owns.
    */
   async apply(config: TitleBarConfig): Promise<void> {
@@ -125,7 +125,19 @@ export const TitleBarService = {
 async function applyColors(config: TitleBarConfig): Promise<void> {
   const wb = vscode.workspace.getConfiguration("workbench");
   const inspected = wb.inspect<Record<string, string>>("colorCustomizations");
-  const current = { ...(inspected?.workspaceValue ?? {}) };
+  const workspaceCurrent = { ...(inspected?.workspaceValue ?? {}) };
+  const current = { ...(inspected?.globalValue ?? {}) };
+
+  // Migrate old workspace-owned title bar colors so the global value wins.
+  for (const key of OWNED_COLOR_KEYS) {
+    delete workspaceCurrent[key];
+  }
+  const hasWorkspaceCustomization = Object.keys(workspaceCurrent).length > 0;
+  await wb.update(
+    "colorCustomizations",
+    hasWorkspaceCustomization ? workspaceCurrent : undefined,
+    vscode.ConfigurationTarget.Workspace
+  );
 
   // Always start from "no opinion" on the keys we own, then re-add them if enabled.
   for (const key of OWNED_COLOR_KEYS) {
@@ -152,29 +164,36 @@ async function applyColors(config: TitleBarConfig): Promise<void> {
   await wb.update(
     "colorCustomizations",
     hasAnyCustomization ? current : undefined,
-    vscode.ConfigurationTarget.Workspace
+    vscode.ConfigurationTarget.Global
   );
 }
 
 async function applyWindowTitle(config: TitleBarConfig): Promise<void> {
   const win = vscode.workspace.getConfiguration("window");
   const inspected = win.inspect<string>("title");
+  const workspaceTitle = inspected?.workspaceValue;
+  const globalTitle = inspected?.globalValue;
+
+  // Clear the legacy workspace value we previously wrote so the global title wins.
+  if (workspaceTitle?.includes("${activeRepositoryBranchName}")) {
+    await win.update("title", undefined, vscode.ConfigurationTarget.Workspace);
+  }
 
   if (!config.enabled || !config.showBranch) {
     // Only clear the value if WE were the ones who last set it (it still
     // contains our marker variable), so we never clobber a title the user
     // wrote by hand for unrelated reasons.
-    if (inspected?.workspaceValue?.includes("${activeRepositoryBranchName}")) {
-      await win.update("title", undefined, vscode.ConfigurationTarget.Workspace);
+    if (globalTitle?.includes("${activeRepositoryBranchName}")) {
+      await win.update("title", undefined, vscode.ConfigurationTarget.Global);
     }
     return;
   }
 
-  const base = inspected?.workspaceValue ?? inspected?.globalValue ?? DEFAULT_WINDOW_TITLE;
+  const base = globalTitle ?? DEFAULT_WINDOW_TITLE;
   // Don't double-append if it's already there (e.g. settings re-applied).
   if (base.includes("${activeRepositoryBranchName}")) {
     return;
   }
   const withBranch = `${base}${config.branchSeparator}\${activeRepositoryBranchName}`;
-  await win.update("title", withBranch, vscode.ConfigurationTarget.Workspace);
+  await win.update("title", withBranch, vscode.ConfigurationTarget.Global);
 }
