@@ -104,6 +104,11 @@ export const pl = {
   "aiAgent.optimizeFailed": "Optymalizacja promptu agentem '{name}' nie powiodła się — użyto oryginalnego promptu.",
   "aiAgent.optimizeEmpty": "Agent '{name}' zwrócił pusty wynik optymalizacji promptu — użyto oryginalnego promptu.",
   "aiAgent.promptOptimized": "Prompt został zoptymalizowany przed wysłaniem (model: {name}).",
+  "aiAgent.autoCommitDone": "Utworzono lokalny commit po pracy AI.",
+  "aiAgent.autoCommitNoChanges": "Auto-commit pominięty - brak zmian w Git.",
+  "aiAgent.autoCommitSkippedDirty":
+    "Auto-commit pominięty - repo miało wcześniejsze niezacommitowane zmiany.",
+  "aiAgent.autoCommitFailed": "Auto-commit nieudany",
 };
 
 export type ExtMessages = typeof pl;

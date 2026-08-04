@@ -245,6 +245,23 @@ export interface TaskAI {
   generatedPrompt: string;
   aiNotes: string;
   reviewChecklist: ChecklistItem[];
+  /**
+   * Persisted AI Agent Chat transcript (user/assistant/system/error/tool
+   * bubbles not already captured by TaskAIAgents.runHistory). Optional so
+   * older tasks without this field keep loading safely — always read via
+   * `task.ai?.aiChatMessages ?? []`.
+   */
+  aiChatMessages?: TaskAIChatMessage[];
+}
+
+/** One persisted AI Agent Chat bubble. Structurally compatible with AiChatMessage (aiChat/aiChatTypes.ts) minus its `turn` field, which is never persisted here. */
+export interface TaskAIChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system" | "error" | "tool";
+  text: string;
+  createdAt: string;
+  errorKind?: "workspace-trust" | "generic";
+  mode?: "agent" | "plan" | "debug" | "multitask" | "ask";
 }
 
 export type BoardEventType =
@@ -273,7 +290,13 @@ export type BoardEventType =
   | "ai_agent_run_failed"
   | "ai_review_started"
   | "ai_review_finished"
-  | "ai_task_moved_to_local";
+  | "ai_task_moved_to_local"
+  | "ai_chat_message_sent"
+  | "ai_plan_requested"
+  | "ai_agent_started"
+  | "ai_agent_finished"
+  | "ai_agent_failed"
+  | "ai_review_saved";
 
 export interface BoardEvent {
   id: string;
@@ -798,6 +821,13 @@ export interface AppConfig {
     allowedAIAgentCommands: string[];
     defaultAIBranchPrefix: string;
     moveToLocalAfterAIAgentSuccess: boolean;
+    optimizePromptsBeforeSend: boolean;
+    promptOptimizerAgentId: string;
+    promptOptimizerModel: string;
+    promptOptimizationRules: string;
+    autoCommitAfterAIAgentSuccess: boolean;
+    aiAgentCommitMessageAgentId: string;
+    aiAgentCommitMessageModel: string;
     aiCostMode: AiCostMode;
     aiLocalOptimizerEnabled: boolean;
     aiLocalOptimizerProvider: AiLocalOptimizerProvider;

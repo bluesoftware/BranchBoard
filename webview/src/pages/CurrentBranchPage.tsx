@@ -5,12 +5,14 @@ import {
   AppConfig,
   BoardData,
   BoardEvent,
+  BoardEventType,
   BoardTask,
   BranchDetail,
   BranchFlowRow,
   ChecklistItem,
   CursorSubAgentInfo,
   DashboardData,
+  FileMentionEntry,
   GitInfo,
   AiCostDecisionPayload,
   AiCostDecisionRequestPayload,
@@ -60,6 +62,8 @@ interface Props {
   onOpenDiff: (branchName: string, path: string) => void;
   onCheckout: (branchName: string) => void;
   onUpdateFromMain: () => void;
+  fileSuggestions: FileMentionEntry[];
+  onSearchFiles: (query: string) => void;
   // --- AI Agent (shared with TaskDrawer via <AiAgentPanel>, no duplicated logic) ---
   cursorAgents: CursorSubAgentInfo[];
   aiAgentLogs: Record<string, AIAgentLogPayload[]>;
@@ -76,6 +80,8 @@ interface Props {
   onCancelAIAgent: (taskId: string) => void;
   onAiPromptCopied: (taskId: string) => void;
   onRefreshCursorAgents: () => void;
+  /** Appends to BranchBoard's existing activity/event log — reuses the same "logEvent" webview message as onAiPromptCopied/onCopyAiPrompt. */
+  onLogEvent?: (taskId: string, type: BoardEventType, payload?: Record<string, unknown>) => void;
 }
 
 const STATUS_TONE: Record<string, BadgeTone> = {
@@ -794,9 +800,12 @@ export function CurrentBranchPage(props: Props) {
                     onAiPromptCopied={() => props.onAiPromptCopied(task.id)}
                     onCheckoutBranch={props.onCheckout}
                     onOpenFile={props.onOpenFile}
+                    fileSuggestions={props.fileSuggestions}
+                    onSearchFiles={props.onSearchFiles}
                     onRefreshCursorAgents={props.onRefreshCursorAgents}
                     git={git}
                     onOpenSettings={props.onOpenSettings}
+                    onLogEvent={(type, payload) => props.onLogEvent?.(task.id, type, payload)}
                     compact
                   />
                 </div>

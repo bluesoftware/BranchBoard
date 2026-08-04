@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { t } from "../i18n";
 import {
@@ -505,12 +506,29 @@ export class AIAgentService {
   }
 
   private writePromptFile(task: BoardTask, kind: AIAgentRunKind, prompt: string): string {
-    const dir = path.join(this.cwd, ".branchboard", "ai");
+    const dir = path.join(os.tmpdir(), "branchboard-ai");
     fs.mkdirSync(dir, { recursive: true });
     const safeTask = task.id.replace(/[^a-z0-9_-]/gi, "_");
-    const file = path.join(dir, `${safeTask}-${kind}-prompt.md`);
+    const nonce = `${Date.now().toString(36)}-${process.pid}-${Math.random().toString(36).slice(2, 7)}`;
+    const file = path.join(dir, `${nonce}-${safeTask}-${kind}-prompt.md`);
     fs.writeFileSync(file, prompt, "utf8");
     return file;
+  }
+
+  private promptFileForArgs(task: BoardTask, kind: AIAgentRunKind, prompt: string, args: string[]): string {
+    return args.some((arg) => arg.includes("{{promptFile}}")) ? this.writePromptFile(task, kind, prompt) : "";
+  }
+
+  discardPromptFile(file: string | undefined): void {
+    if (!file) {
+      return;
+    }
+    const tempRoot = path.join(os.tmpdir(), "branchboard-ai");
+    const resolved = path.resolve(file);
+    if (!resolved.startsWith(path.resolve(tempRoot) + path.sep)) {
+      return;
+    }
+    fs.promises.unlink(resolved).catch(() => undefined);
   }
 
   writePlanFile(task: BoardTask, plan: string, branchName: string, agentName: string): string {
@@ -569,8 +587,9 @@ export class AIAgentService {
     model: string,
     branchName: string
   ): AIAgentPreview {
-    const promptFile = this.writePromptFile(task, kind, prompt);
-    const args = (agent.args || []).map((arg) =>
+    const rawArgs = agent.args || [];
+    const promptFile = this.promptFileForArgs(task, kind, prompt, rawArgs);
+    const args = rawArgs.map((arg) =>
       this.substitute(arg, { prompt, promptFile, model, branch: branchName, task, kind })
     );
     return { agent, command: agent.command, args, promptFile, branchName };
@@ -588,7 +607,7 @@ export class AIAgentService {
    * unexpectedly long argument.
    */
   summarizeArgsForDisplay(args: string[], prompt: string, promptFile: string, maxArgLen = 160): string[] {
-    const promptRef = `<prompt: zobacz ${promptFile}>`;
+    const promptRef = promptFile ? `<prompt: zobacz ${promptFile}>` : "<prompt inline>";
     return args.map((arg) => {
       let value = arg;
       if (prompt && value.includes(prompt)) {
@@ -837,13 +856,15 @@ export class AIAgentService {
       "# ORYGINALNY PROMPT",
       rawPrompt,
     ].join("\n");
-    const promptFile = this.writePromptFile(task, kind, instructionText);
-    const args = (agent.args || []).map((arg) =>
+    const rawArgs = agent.args || [];
+    const promptFile = this.promptFileForArgs(task, kind, instructionText, rawArgs);
+    const args = rawArgs.map((arg) =>
       this.substitute(arg, { prompt: instructionText, promptFile, model, branch: branchName, task, kind })
     );
     const cfg = this.getConfig();
     const timeoutMs = Math.min(Math.max(1, cfg.aiAgentTimeoutSeconds || 900), 180) * 1000;
     const collected = await this.spawnCollect(resolution.executable, args, timeoutMs);
+    this.discardPromptFile(promptFile);
     if (!collected.ok) {
       const missing = collected.spawnError?.code === "ENOENT";
       return {
@@ -869,6 +890,53 @@ export class AIAgentService {
     return { ok: true, prompt: optimized };
   }
 
+  async runTextOnlyPrompt(
+    agent: AIAgentDefinition,
+    model: string,
+    prompt: string,
+    task: BoardTask,
+    branchName: string,
+    timeoutMs = 120_000
+  ): Promise<{ ok: boolean; text: string; message?: string; detail?: string }> {
+    if (!this.isAllowed(agent.command)) {
+      return {
+        ok: false,
+        text: "",
+        message: t("aiAgent.commandBlocked", { command: agent.command }),
+        detail: t("aiAgent.commandBlockedDetail"),
+      };
+    }
+    const resolution = this.resolveExecutable(agent.command);
+    if (!resolution.ok) {
+      return { ok: false, text: "", message: resolution.message, detail: resolution.detail };
+    }
+
+    const rawArgs = agent.args || [];
+    const promptFile = this.promptFileForArgs(task, "run", prompt, rawArgs);
+    const args = rawArgs.map((arg) =>
+      this.substitute(arg, { prompt, promptFile, model, branch: branchName, task, kind: "run" })
+    );
+    const collected = await this.spawnCollect(resolution.executable, args, timeoutMs);
+    this.discardPromptFile(promptFile);
+    if (!collected.ok) {
+      return {
+        ok: false,
+        text: "",
+        message: t("aiAgent.optimizeFailed", { name: agent.name }),
+        detail: collected.stderr?.trim() || collected.spawnError?.message,
+      };
+    }
+
+    const parsed = this.parseOutput(collected.stdout);
+    const text = (parsed.result || parsed.plan || parsed.reviewResult || collected.stdout || "")
+      .replace(/^```[a-z]*\n?/i, "")
+      .replace(/```\s*$/, "")
+      .trim();
+    return text
+      ? { ok: true, text }
+      : { ok: false, text: "", message: t("aiAgent.optimizeEmpty", { name: agent.name }) };
+  }
+
   /**
    * Runs the agent binary and streams its stdout/stderr live via
    * `handlers.onChunk` as data arrives, instead of buffering everything
@@ -884,6 +952,7 @@ export class AIAgentService {
   ): Promise<AIAgentProcessResult> {
     const started = Date.now();
     if (!this.isAllowed(preview.command)) {
+      this.discardPromptFile(preview.promptFile);
       return {
         ok: false,
         action: `aiAgent.${kind}`,
@@ -899,6 +968,7 @@ export class AIAgentService {
 
     const resolution = this.resolveExecutable(preview.command);
     if (!resolution.ok) {
+      this.discardPromptFile(preview.promptFile);
       return {
         ok: false,
         action: `aiAgent.${kind}`,
@@ -946,6 +1016,7 @@ export class AIAgentService {
           stdio: ["ignore", "pipe", "pipe"],
         });
       } catch (err: any) {
+        this.discardPromptFile(preview.promptFile);
         resolve({
           ok: false,
           action: `aiAgent.${kind}`,
@@ -1023,6 +1094,7 @@ export class AIAgentService {
         const out = stdoutBuf;
         const errOut = stderrBuf;
         const parsed = this.parseOutput(out);
+        this.discardPromptFile(preview.promptFile);
         const missing = spawnError?.code === "ENOENT";
         // Only treat as cancelled if we didn't already kill it ourselves for timing out,
         // and it didn't exit cleanly on its own (code === 0, no signal).

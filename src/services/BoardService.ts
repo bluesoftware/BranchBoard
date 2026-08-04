@@ -9,14 +9,41 @@ import {
   BoardNotificationRecord,
   NotificationType,
   AdminAnnouncementConfig,
+  TaskAIChatMessage,
 } from "../types";
-import { StorageProvider, MAX_STORED_ANNOUNCEMENTS, MAX_STORED_NOTIFICATIONS } from "./StorageProvider";
+import {
+  StorageProvider,
+  MAX_STORED_ANNOUNCEMENTS,
+  MAX_STORED_NOTIFICATIONS,
+  MAX_AI_CHAT_MESSAGES_PER_TASK,
+  MAX_AI_CHAT_MESSAGE_CHARS,
+} from "./StorageProvider";
 import { EventService } from "./EventService";
 import { NotificationService } from "./NotificationService";
 import { Logger } from "./Logger";
 
 export interface BoardNotification {
   message: string;
+}
+
+/**
+ * Caps a task's persisted AI Agent Chat transcript before it's written to
+ * disk: clamps each message body to MAX_AI_CHAT_MESSAGE_CHARS and keeps only
+ * the newest MAX_AI_CHAT_MESSAGES_PER_TASK entries. The webview already does
+ * this before calling updateTask, but enforcing it again here means
+ * board.json/SQLite can't bloat even if some other future caller (server
+ * sync, a different panel) writes task.ai.aiChatMessages without going
+ * through the chat panel's own clamp.
+ */
+function clampAiChatMessages(messages: TaskAIChatMessage[]): TaskAIChatMessage[] {
+  const sized = messages.map((m) =>
+    typeof m.text === "string" && m.text.length > MAX_AI_CHAT_MESSAGE_CHARS
+      ? { ...m, text: `${m.text.slice(0, MAX_AI_CHAT_MESSAGE_CHARS)}\n\n…[truncated, ${m.text.length - MAX_AI_CHAT_MESSAGE_CHARS} more characters omitted]` }
+      : m
+  );
+  return sized.length > MAX_AI_CHAT_MESSAGES_PER_TASK
+    ? sized.slice(sized.length - MAX_AI_CHAT_MESSAGES_PER_TASK)
+    : sized;
 }
 
 /**
@@ -611,6 +638,9 @@ export class BoardService {
     const task = board.tasks.find((t) => t.id === id);
     if (!task) {
       return undefined;
+    }
+    if (patch.ai?.aiChatMessages) {
+      patch = { ...patch, ai: { ...patch.ai, aiChatMessages: clampAiChatMessages(patch.ai.aiChatMessages) } };
     }
     Object.assign(task, patch, { id: task.id, updatedAt: this.now() });
     await this.persist();

@@ -738,6 +738,12 @@
     "deleteUser": "Delete user",
     "userName": "Name",
     "userEmail": "Email",
+    "aiAutoCommitTitle": "Auto-commit after AI work",
+    "aiAutoCommit": "Commit successful AI work",
+    "aiAutoCommitHint": "A commit is created only after a successful Work AI run and only when Git sees changes. If the repo already had uncommitted changes before the agent started, auto-commit is skipped (so your own changes don't get folded into the AI commit). Failed CLI responses are not written into the task result history.",
+    "aiCommitMessageAgent": "Commit message agent",
+    "aiCommitMessageModel": "Commit message model",
+    "aiCommitMessageBuiltin": "BranchBoard summary",
     "aiAgentsModelsTitle": "AI agent models & pricing",
     "aiAgentsModelsHint": "Refresh the model list from the agent's CLI (if supported), enter prices, and turn individual models on/off.",
     "aiAgentsNoAgents": "No AI agents configured — add them in branchBoard.aiAgents.",
@@ -1065,7 +1071,8 @@
       "storageMode": "Local JSON in the project, or a shared SQLite database over SSH for the team.",
       "notifShowToast": "Also show a native VS Code notification toast in addition to the bell dropdown.",
       "initials": "Shown on your avatar when you don't have a profile photo. Max 2 characters.",
-      "aiAgentsModels": "For each configured AI agent: the button refreshes its model list from the CLI (if the agent has listModelsArgs set), and the table lets you enter a per-million-token price for each model and turn it on/off. Models with no price are flagged \"no price\" — BranchBoard never guesses a cost."
+      "aiAgentsModels": "For each configured AI agent: the button refreshes its model list from the CLI (if the agent has listModelsArgs set), and the table lets you enter a per-million-token price for each model and turn it on/off. Models with no price are flagged \"no price\" — BranchBoard never guesses a cost.",
+      "aiAutoCommit": "After a successful Work AI run, BranchBoard creates only a local commit summarizing the work — never a push, merge, or deploy. No commit is made if the repo already had uncommitted changes before the agent started, if there's nothing to commit, or if the CLI response was an error. Off by default — enable it deliberately."
     },
     "aiChat": {
       "main": "Chat with the AI Agent: one task, one branch, a chosen model and mode. The result always requires your decision (Accept/Reject) and is never automatically pushed, merged, or deployed.",
@@ -1389,7 +1396,7 @@
       "plan": "Plan",
       "work": "Agent work",
       "review": "Review",
-      "rules": "Rules",
+      "rules": "AI Cost Guard",
       "diff": "Summarize diff",
       "save": "Save note"
     },

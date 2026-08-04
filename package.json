@@ -360,6 +360,21 @@
           "default": true,
           "description": "Move a successfully completed AI Agent task to the local-work column."
         },
+        "branchBoard.autoCommitAfterAIAgentSuccess": {
+          "type": "boolean",
+          "default": false,
+          "description": "After a successful AI Agent 'Praca AI' (run) step, create a local Git commit summarizing the work — only when there are changes to commit and only when the working tree was already clean before the agent started. Never pushes, merges or deploys. Disabled by default; enable consciously in Settings."
+        },
+        "branchBoard.aiAgentCommitMessageAgentId": {
+          "type": "string",
+          "default": "",
+          "description": "Optional id from branchBoard.aiAgents used only to generate the AI Agent auto-commit message. Empty = use BranchBoard's deterministic summary."
+        },
+        "branchBoard.aiAgentCommitMessageModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional model id requested from aiAgentCommitMessageAgentId for the auto-commit message. Empty = the selected agent's default model."
+        },
         "branchBoard.optimizePromptsBeforeSend": {
           "type": "boolean",
           "default": false,

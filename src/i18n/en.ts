@@ -105,4 +105,9 @@ export const en: ExtMessages = {
   "aiAgent.optimizeFailed": "Prompt optimization with agent '{name}' failed — the original prompt was used instead.",
   "aiAgent.optimizeEmpty": "Agent '{name}' returned an empty prompt-optimization result — the original prompt was used instead.",
   "aiAgent.promptOptimized": "The prompt was optimized before sending (model: {name}).",
+  "aiAgent.autoCommitDone": "Created a local commit after the AI work.",
+  "aiAgent.autoCommitNoChanges": "Auto-commit skipped — no changes in Git.",
+  "aiAgent.autoCommitSkippedDirty":
+    "Auto-commit skipped — the repo had uncommitted changes before the agent started.",
+  "aiAgent.autoCommitFailed": "Auto-commit failed",
 };

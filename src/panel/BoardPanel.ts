@@ -5,6 +5,7 @@ import * as fs from "fs";
 import type { ChildProcess } from "child_process";
 import {
   AppConfig,
+  AIAgentChangedFile,
   BoardData,
   BoardNotificationRecord,
   BoardTask,
@@ -314,6 +315,9 @@ export class WebviewController {
         promptOptimizerAgentId: c.promptOptimizerAgentId,
         promptOptimizerModel: c.promptOptimizerModel,
         promptOptimizationRules: c.promptOptimizationRules,
+        autoCommitAfterAIAgentSuccess: c.autoCommitAfterAIAgentSuccess,
+        aiAgentCommitMessageAgentId: c.aiAgentCommitMessageAgentId,
+        aiAgentCommitMessageModel: c.aiAgentCommitMessageModel,
         aiCostMode: c.aiCostMode,
         aiLocalOptimizerEnabled: c.aiLocalOptimizer.enabled,
         aiLocalOptimizerProvider: c.aiLocalOptimizer.provider,
@@ -544,6 +548,111 @@ export class WebviewController {
     );
   }
 
+  private compactCommitLine(value: string, max = 96): string {
+    const line = value.replace(/\s+/g, " ").trim();
+    if (line.length <= max) {
+      return line;
+    }
+    return `${line.slice(0, max - 1).trimEnd()}`;
+  }
+
+  private normalizeCommitMessage(generated: string, fallback: { subject: string; body: string }): { subject: string; body: string } {
+    const cleaned = generated
+      .replace(/^```(?:gitcommit|text|markdown)?\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .trim();
+    const lines = cleaned
+      .split("\n")
+      .map((line) => line.trimEnd())
+      .filter((line, index, arr) => line.trim() || (index > 0 && index < arr.length - 1));
+    const subject = this.compactCommitLine((lines[0] || fallback.subject).replace(/^[-*]\s*/, ""));
+    const body = lines.slice(1).join("\n").trim() || fallback.body;
+    return { subject: subject || fallback.subject, body };
+  }
+
+  private fallbackAIAgentCommitMessage(
+    task: BoardTask,
+    resultText: string,
+    changedFiles: AIAgentChangedFile[],
+    agentName: string,
+    model: string,
+    branchName: string
+  ): { subject: string; body: string } {
+    const summaryLines = resultText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    const fileLines = changedFiles.slice(0, 20).map((file) => `- ${file.status}: ${file.path}`);
+    const body = [
+      `Task: ${task.title}`,
+      `Task ID: ${task.id}`,
+      branchName ? `Branch: ${branchName}` : "",
+      `Agent: ${agentName}`,
+      model ? `Model: ${model}` : "",
+      "",
+      "Summary:",
+      ...(summaryLines.length ? summaryLines.map((line) => `- ${line.replace(/^[-*]\s*/, "")}`) : ["- AI Agent finished successfully."]),
+      "",
+      "Changed files:",
+      ...(fileLines.length ? fileLines : ["- No changed files reported before commit."]),
+    ]
+      .filter((line) => line !== "")
+      .join("\n");
+    return {
+      subject: this.compactCommitLine(`AI: ${task.title}`),
+      body,
+    };
+  }
+
+  private async buildAIAgentCommitMessage(
+    task: BoardTask,
+    resultText: string,
+    changedFiles: AIAgentChangedFile[],
+    agent: { name: string },
+    model: string,
+    branchName: string
+  ): Promise<{ subject: string; body: string }> {
+    const fallback = this.fallbackAIAgentCommitMessage(task, resultText, changedFiles, agent.name, model, branchName);
+    const cfg = this.deps.getConfig();
+    const messageAgent = cfg.aiAgentCommitMessageAgentId
+      ? this.aiAgent.getAgent(cfg.aiAgentCommitMessageAgentId)
+      : null;
+    if (!messageAgent) {
+      return fallback;
+    }
+    const prompt = [
+      "Write a concise Git commit message for the work below.",
+      "Return only the commit message: first line is the subject, optional body after a blank line.",
+      "Do not run tools, do not edit files, do not include Markdown fences.",
+      "",
+      `Task: ${task.title}`,
+      `Task ID: ${task.id}`,
+      `Branch: ${branchName || task.branchName || "(none)"}`,
+      "",
+      "Changed files:",
+      ...(changedFiles.length ? changedFiles.map((file) => `- ${file.status}: ${file.path}`) : ["- (none reported)"]),
+      "",
+      "Agent result:",
+      resultText || "(empty)",
+    ].join("\n");
+    const generated = await this.aiAgent.runTextOnlyPrompt(
+      messageAgent,
+      cfg.aiAgentCommitMessageModel || "",
+      prompt,
+      task,
+      branchName,
+      90_000
+    );
+    if (!generated.ok) {
+      Logger.warn(
+        `[ai-agent] commit message agent skipped for task ${task.id}: ${generated.message ?? ""} ${generated.detail ?? ""}`.trim()
+      );
+      return fallback;
+    }
+    return this.normalizeCommitMessage(generated.text, fallback);
+  }
+
   private async runAIAgentWorkflow(taskId: string, kind: AIAgentRunKind): Promise<OperationResult | undefined> {
     const { board, git, getConfig } = this.deps;
     const cfg = getConfig();
@@ -576,6 +685,16 @@ export class WebviewController {
       this.toast(res);
       return res;
     }
+    // Auto-commit safety snapshot: `git add -A` after the run would otherwise
+    // happily stage whatever the user already had dirty in the working tree
+    // *before* the agent even started — silently folding unrelated, possibly
+    // unreviewed user changes into the AI commit. We record the pre-run dirty
+    // state here, before any branch checkout/agent activity, and only allow
+    // the auto-commit step below to run `git add -A` when the tree was clean
+    // at this point. This only matters for "run" (Praca AI) — auto-commit is
+    // never attempted for "plan" or "review".
+    const wasDirtyBeforeAIAgentRun =
+      kind === "run" && cfg.autoCommitAfterAIAgentSuccess ? await git.hasUncommittedChanges() : false;
 
     const selectedCursorAgents = await this.cursorAgents.getAgentsByIds(aiAgents.selectedCursorAgentIds ?? []);
     const generatedPrompt =
@@ -703,11 +822,12 @@ export class WebviewController {
       `${t("aiAgent.agent")}: ${agent.name}`,
       `${t("aiAgent.command")}: ${preview.command} ${displayArgs.join(" ")}`,
       `${t("aiAgent.branch")}: ${branchName}`,
-      `${t("aiAgent.promptFile")}: ${preview.promptFile}`,
+      preview.promptFile ? `${t("aiAgent.promptFile")}: ${preview.promptFile}` : "",
       "",
       t("aiAgent.confirmRunDetail"),
-    ].join("\n");
+    ].filter(Boolean).join("\n");
     if (!(await this.confirmAIAgentRun(detail))) {
+      this.aiAgent.discardPromptFile(preview.promptFile);
       const res = { ok: false, action: `aiAgent.${kind}`, message: t("aiAgent.cancelled") };
       this.post({ type: "operationResult", payload: res });
       return res;
@@ -781,41 +901,42 @@ export class WebviewController {
     // Stays undefined (never guessed) when either usage or pricing wasn't
     // available — see computeAIAgentCost's doc comment.
     const cost = computeAIAgentCost(result.usage, resolveAIAgentModelPricing(agent, aiAgents.selectedModel));
-    const history = [
-      ...(aiAgents.runHistory ?? []),
-      {
-        id: `airun_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-        agentId: agent.id,
-        model: aiAgents.selectedModel,
-        status: result.ok ? ("finished" as const) : result.cancelled ? ("cancelled" as const) : ("failed" as const),
-        kind,
-        startedAt,
-        finishedAt,
-        prompt: finalPrompt,
-        plan: planText,
-        result: result.result || result.stdout,
-        reviewResult: result.reviewResult,
-        changedFiles: kind === "run" ? changedFiles : undefined,
-        error: result.ok ? undefined : result.detail || result.stderr,
-        branch: branchName,
-        usage: result.usage,
-        cost,
-      },
-    ].slice(-20);
+    const history = result.ok
+      ? [
+          ...(aiAgents.runHistory ?? []),
+          {
+            id: `airun_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+            agentId: agent.id,
+            model: aiAgents.selectedModel,
+            status: "finished" as const,
+            kind,
+            startedAt,
+            finishedAt,
+            prompt: finalPrompt,
+            plan: planText,
+            result: result.result || result.stdout,
+            reviewResult: result.reviewResult,
+            changedFiles: kind === "run" ? changedFiles : undefined,
+            branch: branchName,
+            usage: result.usage,
+            cost,
+          },
+        ].slice(-20)
+      : (aiAgents.runHistory ?? []);
     const nextAIAgents: TaskAIAgents = {
       ...aiAgents,
       status: result.ok ? "finished" : result.cancelled ? "cancelled" : "failed",
-      plan: planText ?? aiAgents.plan,
+      plan: result.ok && kind === "plan" ? planText ?? aiAgents.plan : aiAgents.plan,
       planFile,
-      result: kind === "run" ? result.result || result.stdout || aiAgents.result : aiAgents.result,
-      reviewResult: kind === "review" ? result.reviewResult || result.result || result.stdout : aiAgents.reviewResult,
-      error: result.ok ? "" : result.detail || result.stderr || result.message,
+      result: result.ok && kind === "run" ? result.result || result.stdout || aiAgents.result : aiAgents.result,
+      reviewResult: result.ok && kind === "review" ? result.reviewResult || result.result || result.stdout : aiAgents.reviewResult,
+      error: result.ok ? "" : result.message,
       lastFinishedAt: finishedAt,
       createdBranch: branchName,
-      changedFiles,
+      changedFiles: result.ok && kind === "run" ? changedFiles : aiAgents.changedFiles ?? [],
       runHistory: history,
-      lastUsage: result.usage ?? aiAgents.lastUsage,
-      lastCost: cost ?? aiAgents.lastCost,
+      lastUsage: result.ok ? result.usage ?? aiAgents.lastUsage : aiAgents.lastUsage,
+      lastCost: result.ok ? cost ?? aiAgents.lastCost : aiAgents.lastCost,
     };
     await board.updateTask(task.id, { branchName, aiAgents: nextAIAgents });
     await board.logEvent(
@@ -843,6 +964,50 @@ export class WebviewController {
           branchName,
           payload: { agentId: agent.id, columnId: localColumnId },
         });
+      }
+    }
+
+    if (result.ok && kind === "run" && cfg.autoCommitAfterAIAgentSuccess) {
+      if (wasDirtyBeforeAIAgentRun) {
+        // The working tree already had uncommitted changes before the agent
+        // started, so we cannot tell which changes are the agent's and which
+        // were already there. Skip the auto-commit entirely rather than risk
+        // folding the user's pre-existing work into the AI commit via
+        // `git add -A`. This never blocks the agent run itself — only the
+        // auto-commit step is skipped.
+        const skipResult: OperationResult = {
+          ok: true,
+          action: "commitAIAgentChanges",
+          message: t("aiAgent.autoCommitSkippedDirty"),
+        };
+        this.post({ type: "operationResult", payload: skipResult });
+        Logger.info(`[ai-agent] ${skipResult.message}`);
+      } else {
+        const resultText = result.result || result.stdout || "";
+        const commitMessage = await this.buildAIAgentCommitMessage(
+          task,
+          resultText,
+          changedFiles,
+          agent,
+          aiAgents.selectedModel ?? "",
+          branchName
+        );
+        const commitResult = await git.commitAllChanges(commitMessage.subject, commitMessage.body);
+        const localizedResult: OperationResult & { commitHash?: string } = commitResult.ok
+          ? {
+              ...commitResult,
+              message: commitResult.commitHash ? t("aiAgent.autoCommitDone") : t("aiAgent.autoCommitNoChanges"),
+            }
+          : {
+              ...commitResult,
+              message: `${t("aiAgent.autoCommitFailed")}: ${commitResult.message}`,
+            };
+        this.post({ type: "operationResult", payload: localizedResult });
+        if (!localizedResult.ok) {
+          this.toast(localizedResult);
+        } else {
+          Logger.info(`[ai-agent] ${localizedResult.message}`);
+        }
       }
     }
 

@@ -1033,6 +1033,52 @@ export class GitService {
     }
   }
 
+  /**
+   * Stages and commits everything currently in the working tree.
+   *
+   * Safety note: this runs `git add -A`, so it must only ever be called when
+   * the caller has already verified the working tree was clean immediately
+   * before the AI agent run started. BoardPanel's auto-commit-after-AI-Agent
+   * flow enforces that by snapshotting `hasUncommittedChanges()` before the
+   * run and skipping this call entirely if the tree was already dirty —
+   * otherwise `add -A` could sweep up the user's own unrelated, unreviewed
+   * changes into the AI's commit.
+   */
+  async commitAllChanges(subject: string, body = ""): Promise<OperationResult & { commitHash?: string }> {
+    const cleanSubject = subject.replace(/\s+/g, " ").trim().slice(0, 120) || "BranchBoard AI Agent changes";
+    const cleanBody = body.trim();
+    if (!(await this.hasUncommittedChanges())) {
+      return {
+        ok: true,
+        action: "commitAIAgentChanges",
+        message: "No changes to commit after the AI Agent run.",
+      };
+    }
+    try {
+      await this.run(["add", "-A"]);
+      const args = ["commit", "-m", cleanSubject];
+      if (cleanBody) {
+        args.push("-m", cleanBody);
+      }
+      const { stdout } = await this.run(args);
+      const hash = (await this.run(["rev-parse", "--short", "HEAD"])).stdout.trim();
+      return {
+        ok: true,
+        action: "commitAIAgentChanges",
+        message: hash ? `Committed AI Agent changes (${hash}).` : "Committed AI Agent changes.",
+        detail: stdout.trim(),
+        commitHash: hash || undefined,
+      };
+    } catch (err: any) {
+      return {
+        ok: false,
+        action: "commitAIAgentChanges",
+        message: "AI Agent finished, but Git commit failed.",
+        detail: err?.message,
+      };
+    }
+  }
+
   async getInfo(): Promise<GitInfo> {
     const cfg = this.getConfig();
     const base: GitInfo = {

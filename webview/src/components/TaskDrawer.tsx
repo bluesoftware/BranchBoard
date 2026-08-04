@@ -4,6 +4,7 @@ import {
   AppConfig,
   BoardData,
   BoardEvent,
+  BoardEventType,
   BoardTask,
   ChecklistItem,
   CommitFile,
@@ -83,6 +84,8 @@ interface Props {
   onMergeToMain: () => void;
   onCopyClipboard: (text: string, label: string) => void;
   onAiPromptCopied: () => void;
+  /** Appends to BranchBoard's existing activity/event log — same "logEvent" webview message as onAiPromptCopied, just generic over the AI Agent Chat's own event types. */
+  onLogEvent?: (type: BoardEventType, payload?: Record<string, unknown>) => void;
   onDeployDev: () => void;
   onDeployProduction: () => void;
   onMarkTested: () => void;
@@ -568,8 +571,11 @@ export function TaskDrawer(props: Props) {
                   onAiPromptCopied={props.onAiPromptCopied}
                   onCheckoutBranch={props.onCheckoutBranch}
                   onOpenFile={props.onOpenFile}
+                  fileSuggestions={props.fileSuggestions}
+                  onSearchFiles={props.onSearchFiles}
                   onRefreshCursorAgents={props.onRefreshCursorAgents}
                   git={git}
+                  onLogEvent={props.onLogEvent}
                 />
               </TaskSection>
 

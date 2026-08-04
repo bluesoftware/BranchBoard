@@ -90,6 +90,9 @@ function readConfig(): BranchBoardConfig {
       "promptOptimizationRules",
       "PL: Dopasuj prompt technicznie do agenta docelowego — zachowaj wszystkie fakty, ścieżki plików, kryteria akceptacji i reguły bezpieczeństwa, popraw tylko strukturę, jasność i kolejność instrukcji. Nie dodawaj nowych wymagań, nie usuwaj żadnych ograniczeń.\nEN: Adapt the prompt technically for the target agent — keep every fact, file path, acceptance criterion and safety rule intact, only improve structure, clarity and instruction order. Do not add new requirements, do not drop any constraints."
     ),
+    autoCommitAfterAIAgentSuccess: c.get("autoCommitAfterAIAgentSuccess", false),
+    aiAgentCommitMessageAgentId: c.get("aiAgentCommitMessageAgentId", ""),
+    aiAgentCommitMessageModel: c.get("aiAgentCommitMessageModel", ""),
     aiCostMode: (["auto", "cheap", "balanced", "quality", "manual"].includes(c.get("aiCostMode", "auto"))
       ? c.get("aiCostMode", "auto")
       : "auto") as BranchBoardConfig["aiCostMode"],

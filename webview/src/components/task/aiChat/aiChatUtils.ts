@@ -7,6 +7,24 @@ export function nextChatMessageId(): string {
   return `chat-${Date.now()}-${seq}`;
 }
 
+/** Max number of persisted chat messages kept per task (board.json/SQLite must not grow unbounded with long-lived tasks). Oldest entries are dropped first. */
+export const MAX_CHAT_MESSAGES_PER_TASK = 150;
+
+/** Max characters kept for a single persisted chat message body. Guards against a giant pasted prompt or raw CLI stderr/stdout bloating board.json — the full output still lives in TaskAIAgents.runHistory/error, this is only the chat transcript copy. */
+export const MAX_CHAT_MESSAGE_CHARS = 8000;
+
+/** Truncates an over-long message body before it's persisted, appending a visible marker so the user knows content was cut (never invisible data loss). */
+export function clampChatMessageText(text: string): string {
+  if (text.length <= MAX_CHAT_MESSAGE_CHARS) return text;
+  return `${text.slice(0, MAX_CHAT_MESSAGE_CHARS)}\n\n…[truncated, ${text.length - MAX_CHAT_MESSAGE_CHARS} more characters omitted]`;
+}
+
+/** Applies both the per-message size clamp and the per-task message-count cap before persisting a chat transcript. */
+export function clampChatHistory<T extends { text?: string }>(messages: T[]): T[] {
+  const clamped = messages.map((m) => (typeof m.text === "string" ? { ...m, text: clampChatMessageText(m.text) } : m));
+  return clamped.length > MAX_CHAT_MESSAGES_PER_TASK ? clamped.slice(clamped.length - MAX_CHAT_MESSAGES_PER_TASK) : clamped;
+}
+
 export type SlashCommandId = "prompt" | "plan" | "work" | "review" | "rules" | "diff" | "save";
 
 export interface SlashCommandDef {

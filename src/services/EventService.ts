@@ -79,6 +79,12 @@ export class EventService {
       case "ai_review_started":
       case "ai_review_finished":
       case "ai_task_moved_to_local":
+      case "ai_chat_message_sent":
+      case "ai_plan_requested":
+      case "ai_agent_started":
+      case "ai_agent_finished":
+      case "ai_agent_failed":
+      case "ai_review_saved":
         return "ai";
       case "comment_added":
         return "user";

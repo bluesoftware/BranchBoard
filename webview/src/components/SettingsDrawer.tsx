@@ -538,6 +538,21 @@ export function SettingsDrawer(props: Props) {
   const ssh = appConfig.ssh;
   const activeServer = appConfig.activeStorageKind === "server";
   const conn = props.connectionStatus;
+  const activeAIAgents = (appConfig.aiAgents ?? []).filter((agent) => agent.enabled);
+  const commitMessageAgent =
+    activeAIAgents.find((agent) => agent.id === p.aiAgentCommitMessageAgentId) ?? null;
+  const commitModelOptions = commitMessageAgent?.allowModels
+    ? Array.from(
+        new Set([
+          "auto",
+          ...(commitMessageAgent.models ?? []).filter((model) => model.trim()),
+          ...(commitMessageAgent.modelPricing ?? [])
+            .filter((entry) => entry.active !== false)
+            .map((entry) => entry.modelId)
+            .filter((model) => model.trim()),
+        ])
+      ).filter((model) => !(commitMessageAgent.modelPricing ?? []).some((entry) => entry.modelId === model && entry.active === false))
+    : ["auto"];
 
   return (
     <div className="bb-settings-overlay" onMouseDown={props.onClose}>
@@ -1177,6 +1192,53 @@ export function SettingsDrawer(props: Props) {
 
           {tab === "ai" && (
             <>
+              <div className="bb-section">
+                <div className="bb-section-title">{t("settings.aiAutoCommitTitle")}</div>
+                <Toggle
+                  label={t("settings.aiAutoCommit")}
+                  help={t("tooltips.settings.aiAutoCommit")}
+                  value={p.autoCommitAfterAIAgentSuccess}
+                  onChange={(v) => save("autoCommitAfterAIAgentSuccess", v)}
+                />
+                <div className="bb-field-row">
+                  <div className="bb-field">
+                    <label>{t("settings.aiCommitMessageAgent")}</label>
+                    <select
+                      className="bb-input"
+                      value={p.aiAgentCommitMessageAgentId}
+                      disabled={!p.autoCommitAfterAIAgentSuccess}
+                      onChange={(e) => {
+                        save("aiAgentCommitMessageAgentId", e.target.value);
+                        save("aiAgentCommitMessageModel", "");
+                      }}
+                    >
+                      <option value="">{t("settings.aiCommitMessageBuiltin")}</option>
+                      {activeAIAgents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="bb-field">
+                    <label>{t("settings.aiCommitMessageModel")}</label>
+                    <select
+                      className="bb-input bb-mono"
+                      value={p.aiAgentCommitMessageModel || "auto"}
+                      disabled={!p.autoCommitAfterAIAgentSuccess || !commitMessageAgent?.allowModels}
+                      onChange={(e) => save("aiAgentCommitMessageModel", e.target.value === "auto" ? "" : e.target.value)}
+                    >
+                      {commitModelOptions.map((model) => (
+                        <option key={model} value={model}>
+                          {model === "auto" ? t("aiAgent.modelAuto") : model}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <span className="bb-muted small">{t("settings.aiAutoCommitHint")}</span>
+              </div>
+
               <div className="bb-field">
                 <label className="bb-label-help">
                   {t("settings.aiAgentsModelsTitle")}

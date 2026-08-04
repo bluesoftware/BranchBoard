@@ -178,6 +178,13 @@ const DEFAULT_APP_CONFIG: AppConfig = {
     allowedAIAgentCommands: ["cursor-agent", "claude", "node", "npm", "pnpm"],
     defaultAIBranchPrefix: "ai/",
     moveToLocalAfterAIAgentSuccess: true,
+    optimizePromptsBeforeSend: false,
+    promptOptimizerAgentId: "",
+    promptOptimizerModel: "",
+    promptOptimizationRules: "",
+    autoCommitAfterAIAgentSuccess: false,
+    aiAgentCommitMessageAgentId: "",
+    aiAgentCommitMessageModel: "",
     aiCostMode: "auto",
     aiLocalOptimizerEnabled: false,
     aiLocalOptimizerProvider: "local-command",
@@ -879,6 +886,14 @@ export function App() {
               payload: { title: activeTask.title },
             })
           }
+          onLogEvent={(type, payload) =>
+            post("logEvent", {
+              type,
+              taskId: activeTask.id,
+              branchName: activeTask.branchName || null,
+              payload: payload ?? {},
+            })
+          }
           onDeployDev={() => post("deployDev", { taskId: activeTask.id })}
           onDeployProduction={() => post("deployProduction", { taskId: activeTask.id })}
           onMarkTested={() => post("markTested", { taskId: activeTask.id })}
@@ -1129,6 +1144,8 @@ export function App() {
             onOpenDiff={(branchName, path) => post("openDiff", { branchName, path })}
             onCheckout={(branchName) => post("checkoutBranch", { branchName })}
             onUpdateFromMain={() => post("updateBranchFromMain", { strategy: appConfig.policy.updateBranchStrategy })}
+            fileSuggestions={fileSuggestions}
+            onSearchFiles={(query) => post("searchFiles", { query })}
             cursorAgents={cursorAgents}
             aiAgentLogs={aiAgentLogs}
             aiAgentRunning={aiAgentRunning}
@@ -1148,6 +1165,14 @@ export function App() {
                 taskId,
                 branchName: board.tasks.find((x) => x.id === taskId)?.branchName || null,
                 payload: { title: board.tasks.find((x) => x.id === taskId)?.title },
+              })
+            }
+            onLogEvent={(taskId, type, payload) =>
+              post("logEvent", {
+                type,
+                taskId,
+                branchName: board.tasks.find((x) => x.id === taskId)?.branchName || null,
+                payload: payload ?? {},
               })
             }
             onRefreshCursorAgents={() => post("getCursorAgents", { refresh: true })}

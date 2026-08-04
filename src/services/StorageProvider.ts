@@ -159,5 +159,11 @@ export const MAX_STORED_NOTIFICATIONS = 200;
 /** Hard cap on admin announcements; each announcement tracks per-user read state. */
 export const MAX_STORED_ANNOUNCEMENTS = 50;
 
+/** Hard cap on persisted AI Agent Chat messages kept per task, so a long-lived task's transcript can't grow board.json/SQLite without bound. Mirrors webview/src/components/task/aiChat/aiChatUtils.ts MAX_CHAT_MESSAGES_PER_TASK — enforced again here as the host-side last line of defense before persist. */
+export const MAX_AI_CHAT_MESSAGES_PER_TASK = 150;
+
+/** Hard cap on a single persisted AI Agent Chat message's character length (guards against a giant pasted prompt or raw CLI stdout/stderr bloating storage). Mirrors webview/src/components/task/aiChat/aiChatUtils.ts MAX_CHAT_MESSAGE_CHARS. */
+export const MAX_AI_CHAT_MESSAGE_CHARS = 8000;
+
 /** Standard column set used by the onboarding "Create board" flow (Git-mapped). */
 export const ONBOARDING_COLUMNS: BoardData["columns"] = GIT_FLOW_COLUMNS_EN.map((c) => ({ ...c }));

@@ -5,8 +5,11 @@ import {
   AIAgentRunKind,
   AppConfig,
   BoardData,
+  BoardEventType,
   BoardTask,
   CursorSubAgentInfo,
+  FileMentionEntry,
+  TaskAI,
   TaskAIAgents,
   AiCostDecisionPayload,
   AiCostDecisionRequestPayload,
@@ -17,7 +20,7 @@ import { BranchIcon, ChevronDownIcon, CopyIcon, GearIcon, RefreshIcon, SparkleIc
 import { EmptyState } from "../../common/EmptyState";
 import { Help } from "../../common/Help";
 import { AI_CHAT_MODES, AiChatMessage, AiChatMode } from "./aiChatTypes";
-import { composePrompt, isWorkspaceTrustError, nextChatMessageId, parseSlashCommand } from "./aiChatUtils";
+import { clampChatHistory, composePrompt, isWorkspaceTrustError, nextChatMessageId, parseSlashCommand } from "./aiChatUtils";
 import { AiChatMessageList } from "./AiChatMessageList";
 import { AiChatComposer } from "./AiChatComposer";
 import { AiQuickActions } from "./AiQuickActions";
@@ -43,12 +46,16 @@ interface Props {
   onAiPromptCopied: () => void;
   onCheckoutBranch: (branchName: string) => void;
   onOpenFile: (path: string) => void;
+  fileSuggestions: FileMentionEntry[];
+  onSearchFiles: (query: string) => void;
   onRefreshCursorAgents: () => void;
   /** Optional: live local/origin/dev/prod git state, used only to show whether the task's branch is currently checked out — BranchBoard never fabricates a dev/prod badge it can't actually verify. */
   git?: { currentBranch: string | null } | null;
   /** Optional deep link to settings, shown in the "no active models" empty state and the agent picker menu when available. */
   onOpenSettings?: () => void;
   compact?: boolean;
+  /** Appends an entry to BranchBoard's existing activity/event log (board.logEvent via the "logEvent" webview message) — no new event infrastructure, just reuses the same channel as onAiPromptCopied. Optional so the panel still works in contexts that don't wire it up. */
+  onLogEvent?: (type: BoardEventType, payload?: Record<string, unknown>) => void;
 }
 
 /**
@@ -67,7 +74,10 @@ export function AiAgentChatPanel(props: Props) {
   const [forceOpen, setForceOpen] = useState(false);
   const [composerText, setComposerText] = useState("");
   const [mode, setMode] = useState<AiChatMode>("agent");
-  const [ephemeral, setEphemeral] = useState<AiChatMessage[]>([]);
+  // Persisted chat history (task.ai.aiChatMessages) is the source of truth;
+  // `ephemeral` is just its in-memory mirror for fast renders. Old tasks
+  // without `task.ai.aiChatMessages` safely default to an empty array.
+  const [ephemeral, setEphemeral] = useState<AiChatMessage[]>(task.ai?.aiChatMessages ?? []);
   const [customAiModelMode, setCustomAiModelMode] = useState(false);
   const [cursorAgentOverride, setCursorAgentOverride] = useState<{ taskId: string; ids: string[] } | null>(null);
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
@@ -76,10 +86,11 @@ export function AiAgentChatPanel(props: Props) {
   useEffect(() => {
     setForceOpen(false);
     setComposerText("");
-    setEphemeral([]);
+    setEphemeral(task.ai?.aiChatMessages ?? []);
     setCustomAiModelMode(false);
     setCursorAgentOverride((current) => (current && current.taskId !== task.id ? null : current));
     lastSeenErrorRef.current = "";
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id]);
 
   const enabledAIAgents = (appConfig.aiAgents ?? []).filter((agent) => agent.enabled);
@@ -100,6 +111,15 @@ export function AiAgentChatPanel(props: Props) {
     runHistory: [],
   };
   const saveAIAgents = (patch: Partial<TaskAIAgents>) => props.onSave({ aiAgents: { ...aiAgents, ...patch } });
+
+  // Single choke point for writing to task.ai — always carries forward the
+  // required, non-optional TaskAI fields (reviewChecklist, aiNotes, etc.) so
+  // a partial patch (e.g. just aiChatMessages) never drops existing data.
+  const defaultTaskAI: TaskAI = { createdByAi: false, usedModel: "", generatedPrompt: "", aiNotes: "", reviewChecklist: [] };
+  const saveTaskAI = (patch: Partial<TaskAI>) => {
+    const base = task.ai ?? defaultTaskAI;
+    props.onSave({ ai: { ...defaultTaskAI, ...base, ...patch } });
+  };
 
   const selectedAIAgentId = aiAgents.selectedAgentIds?.[0] ?? "";
   const selectedAIAgent = selectedAIAgentId
@@ -146,7 +166,23 @@ export function AiAgentChatPanel(props: Props) {
   };
 
   const pushMessage = (msg: Omit<AiChatMessage, "id" | "createdAt">) => {
-    setEphemeral((prev) => [...prev, { ...msg, id: nextChatMessageId(), createdAt: new Date().toISOString() }]);
+    const entry: AiChatMessage = { ...msg, id: nextChatMessageId(), createdAt: new Date().toISOString() };
+    // Clamp before touching state/storage: caps the per-message body size
+    // (e.g. a pasted prompt or a raw CLI error string) and the total
+    // messages kept for this task, so board.json/SQLite can't grow without
+    // bound on a long-lived task. The full untruncated output still lives
+    // in TaskAIAgents.runHistory/error — this is only the chat transcript copy.
+    const next = clampChatHistory([...ephemeral, entry]);
+    setEphemeral(next);
+    // Persist immediately so the transcript survives closing/reopening the
+    // task — turn-based assistant messages are NOT included here since they
+    // already live in TaskAIAgents.runHistory (avoids duplication).
+    saveTaskAI({ aiChatMessages: next });
+  };
+
+  const clearConversation = () => {
+    setEphemeral([]);
+    saveTaskAI({ aiChatMessages: [] });
   };
 
   // --- Chat timeline: persisted runHistory turns + ephemeral local bubbles ---
@@ -230,17 +266,16 @@ export function AiAgentChatPanel(props: Props) {
       pushMessage({ role: "system", text: t("aiChat.noResultToSave") });
       return;
     }
-    props.onSave({
-      ai: {
-        reviewChecklist: task.ai?.reviewChecklist ?? [],
-        ...(task.ai ?? {}),
-        createdByAi: true,
-        usedModel: selectedModel,
-        generatedPrompt: aiAgents.prompt ?? "",
-        aiNotes: resultText,
-      },
+    saveTaskAI({
+      createdByAi: true,
+      usedModel: selectedModel,
+      generatedPrompt: aiAgents.prompt ?? "",
+      aiNotes: resultText,
     });
     pushMessage({ role: "system", text: t("aiChat.savedToTask") });
+    if (latestTurn?.kind === "review") {
+      props.onLogEvent?.("ai_review_saved", { taskId: task.id, agentId: latestTurn.agentId });
+    }
   };
 
   const saveAsChecklist = () => {
@@ -285,14 +320,28 @@ export function AiAgentChatPanel(props: Props) {
     props.onAiPromptCopied();
   };
 
+  // Guards against a single user "send" turning into two task saves: a key
+  // repeat on Enter (or an Enter keydown racing a Send-button click) can call
+  // send() twice before React flushes the setComposerText("") below, since
+  // `composerText` in the closure doesn't update synchronously. sendLockRef
+  // is checked/set synchronously so the second call sees raw === "" and
+  // bails on the empty-text guard instead of pushing a duplicate message.
+  const sendLockRef = useRef(false);
+
   const send = () => {
+    if (sendLockRef.current) return;
     const raw = composerText;
     if (!raw.trim() || isAgentRunning) return;
+    sendLockRef.current = true;
+    setComposerText("");
+    queueMicrotask(() => {
+      sendLockRef.current = false;
+    });
     ensureEnabled();
+    props.onLogEvent?.("ai_chat_message_sent", { mode, length: raw.length });
 
     const slash = parseSlashCommand(raw);
     if (slash) {
-      setComposerText("");
       switch (slash.command.id) {
         case "prompt":
           handleGeneratePrompt();
@@ -300,6 +349,7 @@ export function AiAgentChatPanel(props: Props) {
         case "plan":
           if (slash.rest) saveAIAgents({ prompt: slash.rest, status: "ready" });
           pushMessage({ role: "user", text: raw, mode: "plan" });
+          props.onLogEvent?.("ai_plan_requested", { taskId: task.id, source: "slash" });
           props.onRunAIAgentPlan();
           return;
         case "work":
@@ -327,14 +377,25 @@ export function AiAgentChatPanel(props: Props) {
     const prompt = composePrompt(mode, raw, t);
     saveAIAgents({ prompt, status: "ready" });
     pushMessage({ role: "user", text: raw, mode });
-    setComposerText("");
     const modeDef = AI_CHAT_MODES.find((m) => m.id === mode) ?? AI_CHAT_MODES[0];
     if (modeDef.backendKind === "run") {
       props.onRunAIAgent();
     } else {
+      props.onLogEvent?.("ai_plan_requested", { taskId: task.id, source: "mode", mode });
       props.onRunAIAgentPlan();
     }
   };
+
+  // NOTE: ai_agent_started/finished/failed used to be logged here from a
+  // useEffect watching aiAgentRunningKind. That duplicated the host-side
+  // events BoardPanel already logs at the actual run boundaries
+  // (ai_agent_plan_started/ai_agent_run_started/ai_review_started and their
+  // *_finished/*_run_failed counterparts — see runAIAgent in BoardPanel.ts),
+  // so every plan/run/review showed up twice in Activity. The host is the
+  // right place for this: it's where the run actually starts and ends, it
+  // can't double-fire under React Strict Mode, and it doesn't depend on a
+  // render committing. Removed the client-side duplicate; no replacement
+  // logging is needed here.
 
   const status: "idle" | "busy" | "error" = isAgentRunning ? "busy" : aiAgents.status === "failed" ? "error" : "idle";
 
@@ -368,6 +429,27 @@ export function AiAgentChatPanel(props: Props) {
           ) : (
             <span className="bb-badge tone-neutral">{t("task.noBranch")}</span>
           )}
+          {/* Always-visible AI Cost Guard status — otherwise the only way to
+              know it ran (or to find it at all) was typing /rules and
+              scrolling back through the chat for the system message. Shows
+              the last decision for this task when one exists; clicking it
+              drops /rules into the composer instead of re-running anything
+              by itself (consistent with the AiQuickActions chips below). */}
+          <button
+            type="button"
+            className={`bb-badge bb-badge-action ${
+              props.aiCostDecision ? `tone-${props.aiCostDecision.costRisk}` : "tone-neutral"
+            }`}
+            onClick={() => setComposerText((v) => (v.trim() ? v : "/rules "))}
+            title={
+              props.aiCostDecision
+                ? `${t("aiCostGuard.title")} — ${t("aiCostGuard.decision")}: ${t(`aiCostGuard.action.${props.aiCostDecision.action}`)}, ${t("aiCostGuard.costRisk")}: ${t(`aiCostGuard.risk.${props.aiCostDecision.costRisk}`)}`
+                : t("tooltips.aiChat.quick.rules")
+            }
+          >
+            {t("aiCostGuard.title")}
+            {props.aiCostDecision ? `: ${t(`aiCostGuard.risk.${props.aiCostDecision.costRisk}`)}` : ""}
+          </button>
         </div>
         <div className="bb-ai-chat-topbar-actions">
           <div className="bb-menu-wrap">
@@ -439,7 +521,7 @@ export function AiAgentChatPanel(props: Props) {
           <button
             type="button"
             className="bb-btn ghost sm"
-            onClick={() => setEphemeral([])}
+            onClick={clearConversation}
             title={t("tooltips.aiChat.clearConversation")}
           >
             {t("aiChat.clearConversation")}
@@ -466,60 +548,64 @@ export function AiAgentChatPanel(props: Props) {
         </div>
       )}
 
-      {aiAgents.createdBranch && (
-        <div className="bb-ai-branch-card">
-          <span className="bb-ai-branch-label">{t("aiAgent.createdBranch")}</span>
-          <code>{aiAgents.createdBranch}</code>
-          <button className="bb-btn ghost sm" onClick={() => props.onCheckoutBranch(aiAgents.createdBranch!)} title={t("tooltips.aiAgent.checkoutBranch")}>
-            {t("aiAgent.checkoutBranch")}
+      <div className="bb-ai-chat-dock">
+        {aiAgents.createdBranch && (
+          <div className="bb-ai-branch-card bb-ai-chat-branch-card">
+            <span className="bb-ai-branch-label">{t("aiAgent.createdBranch")}</span>
+            <code>{aiAgents.createdBranch}</code>
+            <button className="bb-btn ghost sm" onClick={() => props.onCheckoutBranch(aiAgents.createdBranch!)} title={t("tooltips.aiAgent.checkoutBranch")}>
+              {t("aiAgent.checkoutBranch")}
+            </button>
+          </div>
+        )}
+
+        <div className="bb-ai-decision-panel bb-ai-chat-decision">
+          <button className="bb-ai-decision-card accept" onClick={props.onAcceptAIAgentResult} title={t("tooltips.aiAgent.accept")}>
+            <strong>{t("aiAgent.acceptResult")}</strong>
           </button>
+          <button className="bb-ai-decision-card reject" onClick={props.onRejectAIAgentResult} title={t("tooltips.aiAgent.reject")}>
+            <strong>{t("aiAgent.rejectResult")}</strong>
+          </button>
+          {latestTurnHasContent && (
+            <button type="button" className="bb-btn ghost sm" onClick={saveAsChecklist} title={t("tooltips.aiChat.saveChecklist")}>
+              {t("aiChat.saveChecklist")}
+            </button>
+          )}
+          {!aiAgents.enabled && enabledAIAgents.length === 0 && (
+            <button type="button" className="bb-btn ghost sm" onClick={props.onRefreshCursorAgents} title={t("tooltips.aiAgent.cursorPersonas")}>
+              <RefreshIcon size={12} />
+              {t("aiAgent.cursorPersonas.refresh")}
+            </button>
+          )}
         </div>
-      )}
 
-      <div className="bb-ai-decision-panel bb-ai-chat-decision">
-        <button className="bb-ai-decision-card accept" onClick={props.onAcceptAIAgentResult} title={t("tooltips.aiAgent.accept")}>
-          <strong>{t("aiAgent.acceptResult")}</strong>
-        </button>
-        <button className="bb-ai-decision-card reject" onClick={props.onRejectAIAgentResult} title={t("tooltips.aiAgent.reject")}>
-          <strong>{t("aiAgent.rejectResult")}</strong>
-        </button>
-        {latestTurnHasContent && (
-          <button type="button" className="bb-btn ghost sm" onClick={saveAsChecklist} title={t("tooltips.aiChat.saveChecklist")}>
-            {t("aiChat.saveChecklist")}
-          </button>
-        )}
-        {!aiAgents.enabled && enabledAIAgents.length === 0 && (
-          <button type="button" className="bb-btn ghost sm" onClick={props.onRefreshCursorAgents} title={t("tooltips.aiAgent.cursorPersonas")}>
-            <RefreshIcon size={12} />
-            {t("aiAgent.cursorPersonas.refresh")}
-          </button>
-        )}
+        <AiQuickActions onInsert={(text) => setComposerText((prev) => `${prev}${text}`)} onGeneratePrompt={handleGeneratePrompt} disabled={isAgentRunning} />
+
+        <AiChatComposer
+          task={task}
+          value={composerText}
+          onChange={setComposerText}
+          onSend={send}
+          onCancel={props.onCancelAIAgent}
+          mode={mode}
+          onModeChange={setMode}
+          status={status}
+          busy={isAgentRunning}
+          enabledAIAgents={enabledAIAgents}
+          selectedAIAgent={selectedAIAgent}
+          selectedModel={selectedModel}
+          customModelMode={customAiModelMode}
+          onSelectModel={(model) => saveAIAgents({ selectedModel: model })}
+          onSetCustomMode={setCustomAiModelMode}
+          onOpenSettings={props.onOpenSettings}
+          fileSuggestions={props.fileSuggestions}
+          onSearchFiles={props.onSearchFiles}
+          cursorAgents={props.cursorAgents}
+          selectedCursorAgentIds={effectiveSelectedCursorAgentIds}
+          onTogglePersona={togglePersona}
+          onRefreshPersonas={props.onRefreshCursorAgents}
+        />
       </div>
-
-      <AiQuickActions onInsert={(text) => setComposerText((prev) => `${prev}${text}`)} onGeneratePrompt={handleGeneratePrompt} disabled={isAgentRunning} />
-
-      <AiChatComposer
-        task={task}
-        value={composerText}
-        onChange={setComposerText}
-        onSend={send}
-        onCancel={props.onCancelAIAgent}
-        mode={mode}
-        onModeChange={setMode}
-        status={status}
-        busy={isAgentRunning}
-        enabledAIAgents={enabledAIAgents}
-        selectedAIAgent={selectedAIAgent}
-        selectedModel={selectedModel}
-        customModelMode={customAiModelMode}
-        onSelectModel={(model) => saveAIAgents({ selectedModel: model })}
-        onSetCustomMode={setCustomAiModelMode}
-        onOpenSettings={props.onOpenSettings}
-        cursorAgents={props.cursorAgents}
-        selectedCursorAgentIds={effectiveSelectedCursorAgentIds}
-        onTogglePersona={togglePersona}
-        onRefreshPersonas={props.onRefreshCursorAgents}
-      />
     </div>
   );
 }

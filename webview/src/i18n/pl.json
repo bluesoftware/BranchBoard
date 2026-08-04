@@ -738,6 +738,12 @@
     "deleteUser": "Usuń użytkownika",
     "userName": "Imię",
     "userEmail": "E-mail",
+    "aiAutoCommitTitle": "Auto-commit po pracy AI",
+    "aiAutoCommit": "Commituj udaną pracę AI",
+    "aiAutoCommitHint": "Commit powstaje tylko po udanym trybie „Praca AI” i tylko wtedy, gdy Git widzi zmiany. Jeśli repo miało niezacommitowane zmiany jeszcze przed startem agenta, auto-commit jest pomijany (żeby nie wmieszać Twoich własnych zmian w commit AI). Błędne odpowiedzi CLI nie trafiają do historii wyniku zadania.",
+    "aiCommitMessageAgent": "Agent do wiadomości commita",
+    "aiCommitMessageModel": "Model wiadomości commita",
+    "aiCommitMessageBuiltin": "Podsumowanie BranchBoard",
     "aiAgentsModelsTitle": "Modele agentów AI i cennik",
     "aiAgentsModelsHint": "Odśwież listę modeli z CLI agenta (jeśli wspiera), wpisz ceny i włącz/wyłącz pojedyncze modele.",
     "aiAgentsNoAgents": "Brak skonfigurowanych agentów AI — dodaj je w branchBoard.aiAgents.",
@@ -1065,7 +1071,8 @@
       "storageMode": "Lokalny JSON w projekcie albo wspólna baza SQLite po SSH dla zespołu.",
       "notifShowToast": "Pokazuje też natywny toast VS Code, oprócz listy w dzwonku powiadomień.",
       "initials": "Widoczne na Twoim awatarze, gdy nie masz zdjęcia profilowego. Maks. 2 znaki.",
-      "aiAgentsModels": "Dla każdego skonfigurowanego agenta AI: przycisk odświeża listę modeli z jego CLI (jeśli agent ma ustawione listModelsArgs), a tabela pozwala wpisać cenę za milion tokenów dla każdego modelu i włączyć/wyłączyć go. Modele bez ceny są oznaczone „brak ceny” — BranchBoard nigdy nie zgaduje kosztu."
+      "aiAgentsModels": "Dla każdego skonfigurowanego agenta AI: przycisk odświeża listę modeli z jego CLI (jeśli agent ma ustawione listModelsArgs), a tabela pozwala wpisać cenę za milion tokenów dla każdego modelu i włączyć/wyłączyć go. Modele bez ceny są oznaczone „brak ceny” — BranchBoard nigdy nie zgaduje kosztu.",
+      "aiAutoCommit": "Po udanym trybie „Praca AI” BranchBoard robi tylko lokalny commit z podsumowaniem pracy — nigdy push, merge ani deploy. Commit nie powstaje, jeśli repo miało niezacommitowane zmiany jeszcze przed startem agenta, jeśli nie ma żadnych zmian do zacommitowania, lub jeśli odpowiedź CLI była błędna. Domyślnie wyłączone — włącz świadomie."
     },
     "aiChat": {
       "main": "Czat z AI Agentem: jedno zadanie, jeden branch, wybrany model i tryb. Wynik zawsze wymaga Twojej decyzji (Akceptuj/Odrzuć) i nigdy nie jest automatycznie wypychany, scalany ani wdrażany.",
@@ -1389,7 +1396,7 @@
       "plan": "Plan",
       "work": "Praca AI",
       "review": "Review",
-      "rules": "Rules",
+      "rules": "AI Cost Guard",
       "diff": "Podsumuj diff",
       "save": "Zapisz notatkę"
     },

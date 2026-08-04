@@ -317,6 +317,23 @@ export interface TaskAI {
   generatedPrompt: string;
   aiNotes: string;
   reviewChecklist: ChecklistItem[];
+  /**
+   * Persisted AI Agent Chat transcript (user/assistant/system/error/tool
+   * bubbles that are NOT already captured by TaskAIAgents.runHistory).
+   * Optional so older boards/tasks without this field keep loading safely —
+   * always read via `task.ai?.aiChatMessages ?? []`.
+   */
+  aiChatMessages?: TaskAIChatMessage[];
+}
+
+/** One persisted AI Agent Chat bubble. Mirrors webview/src/components/task/aiChat/aiChatTypes.ts AiChatMessage (minus the `turn` field, which is never persisted here since it's already stored in TaskAIAgents.runHistory). */
+export interface TaskAIChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system" | "error" | "tool";
+  text: string;
+  createdAt: string;
+  errorKind?: "workspace-trust" | "generic";
+  mode?: "agent" | "plan" | "debug" | "multitask" | "ask";
 }
 
 /* ---------- Command Center: events & deployments ---------- */
@@ -347,7 +364,13 @@ export type BoardEventType =
   | "ai_agent_run_failed"
   | "ai_review_started"
   | "ai_review_finished"
-  | "ai_task_moved_to_local";
+  | "ai_task_moved_to_local"
+  | "ai_chat_message_sent"
+  | "ai_plan_requested"
+  | "ai_agent_started"
+  | "ai_agent_finished"
+  | "ai_agent_failed"
+  | "ai_review_saved";
 
 /** A single audit-trail entry, stored on the board. */
 export interface BoardEvent {
@@ -868,6 +891,18 @@ export interface BranchBoardConfig {
   promptOptimizerModel: string;
   /** Free-text instructions (PL/EN) given to the optimizer model describing how prompts should be technically adapted before sending. */
   promptOptimizationRules: string;
+  /**
+   * Commit successful "Praca AI" (run) changes automatically after the agent
+   * exits without error. Skipped if there are no changes, or if the working
+   * tree already had uncommitted changes before the agent started (to avoid
+   * `git add -A` sweeping up unrelated user changes). Never pushes, merges
+   * or deploys. Default: false — off until the user opts in.
+   */
+  autoCommitAfterAIAgentSuccess: boolean;
+  /** Optional aiAgents[].id used only to write a commit message. Empty = use BranchBoard's deterministic summary. */
+  aiAgentCommitMessageAgentId: string;
+  /** Optional model id requested from aiAgentCommitMessageAgentId. Empty = that agent's default. */
+  aiAgentCommitMessageModel: string;
 
   /* ---------- AI Cost Guard / Local AI Optimizer ---------- */
 
@@ -1061,6 +1096,9 @@ export interface AppConfig {
     promptOptimizerAgentId: string;
     promptOptimizerModel: string;
     promptOptimizationRules: string;
+    autoCommitAfterAIAgentSuccess: boolean;
+    aiAgentCommitMessageAgentId: string;
+    aiAgentCommitMessageModel: string;
     aiCostMode: AiCostMode;
     /** Whether a local optimizer model is configured/enabled — the command/endpoint themselves stay host-side only. */
     aiLocalOptimizerEnabled: boolean;
