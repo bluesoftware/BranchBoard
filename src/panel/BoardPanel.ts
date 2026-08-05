@@ -1472,7 +1472,7 @@ export class WebviewController {
    *  feature    -> create or checkout the task branch
    *  review     -> push the task branch
    *  staging    -> merge the task branch into the target (dev) and push
-   *  production -> the safe finish flow (push + optional merge to main)
+   *  production -> no auto-finish on move; finishing stays explicit
    */
   private async runStageGitActions(
     msg: InboundMessage,
@@ -1583,7 +1583,7 @@ export class WebviewController {
     }
 
     if (stage === "production") {
-      return this.runFinishFlow(msg, taskId);
+      return undefined;
     }
     return undefined;
   }

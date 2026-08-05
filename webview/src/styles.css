@@ -2370,8 +2370,9 @@ select.bb-input {
   font-size: 12.5px;
 }
 .bb-check-text.done {
-  text-decoration: line-through;
+  text-decoration: none;
   color: var(--bb-muted);
+  opacity: 0.72;
 }
 .bb-progress {
   height: 5px;

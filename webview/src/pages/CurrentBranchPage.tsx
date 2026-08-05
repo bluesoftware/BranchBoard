@@ -105,7 +105,7 @@ function timeLabels() {
 
 function bucketOf(name: string): "in-progress" | "review" | "testing" | "done" | "other" {
   const s = name.toLowerCase();
-  if (/zrobione|gotowe|done|produkc/.test(s)) return "done";
+  if (/zrobione|gotowe|done/.test(s)) return "done";
   if (/test|do.?testu|qa/.test(s)) return "testing";
   if (/review|przegl|do.?zatwierdz/.test(s)) return "review";
   if (/in.?progress|w.?toku|w.?trakcie/.test(s)) return "in-progress";
