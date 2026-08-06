@@ -695,6 +695,13 @@ export class BoardService {
     ) {
       patch = { ...patch, isDevActive: false };
     }
+    if ("status" in patch && !("finishedAt" in patch)) {
+      if (patch.status === "done") {
+        patch = { ...patch, finishedAt: task.finishedAt ?? this.now() };
+      } else if (patch.status === "open" || patch.status === "in-progress") {
+        patch = { ...patch, finishedAt: null };
+      }
+    }
     Object.assign(task, patch, { id: task.id, updatedAt: this.now() });
     if (task.isDevActive) {
       this.setSingleDevActiveInColumn(nextColumnId, task.id);
@@ -747,11 +754,13 @@ export class BoardService {
       reindex(fromColumnId);
     }
 
-    // Auto status only when entering an explicit done column.
+    // Auto status only when entering an explicit done column that is not a
+    // production stage. Production columns finish a task only after the
+    // explicit Git flow succeeds.
     const destCol = board.columns.find((c) => c.id === toColumnId);
     const fromCol = board.columns.find((c) => c.id === fromColumnId);
     const enteringDone =
-      !!destCol && (
+      !!destCol && destCol.gitStage !== "production" && (
         destCol.id === "done" ||
         /zrobione|done/i.test(destCol.name)
       );

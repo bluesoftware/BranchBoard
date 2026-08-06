@@ -742,7 +742,6 @@ export function CurrentBranchPage(props: Props) {
               <div className="bb-flow-stages">
                 {sortedColumns.map((c) => {
                   const isCurrent = c.id === task.columnId;
-                  const done = bucketOf(c.name) === "done";
                   const isAiStage = c.gitStage === "ai-agent";
                   const moveAllowed = guardTaskMove(board, props.appConfig, task, c.id).ok;
                   const stage = (
@@ -752,8 +751,7 @@ export function CurrentBranchPage(props: Props) {
                       disabled={!isCurrent && !moveAllowed}
                       onClick={() => {
                         if (isCurrent || !moveAllowed) return;
-                        if (done) props.onFinish(task.id);
-                        else props.onMoveTask(task.id, c.id);
+                        props.onMoveTask(task.id, c.id);
                       }}
                     >
                       {isAiStage && <SparkleIcon size={11} />}

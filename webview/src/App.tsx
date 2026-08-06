@@ -560,7 +560,7 @@ export function App() {
   );
 
   const isInactiveTask = useCallback(
-    (task: BoardTask): boolean => task.status === "done" || !!task.finishedAt || isDoneColumn(task.columnId),
+    (task: BoardTask): boolean => task.status === "done" || isDoneColumn(task.columnId),
     [isDoneColumn]
   );
 

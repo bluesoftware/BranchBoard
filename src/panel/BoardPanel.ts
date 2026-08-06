@@ -1412,9 +1412,14 @@ export class WebviewController {
   }
 
   /** Run the safe finish flow for a task and apply its board side-effects. */
-  private async runFinishFlow(msg: InboundMessage, taskId: string): Promise<OperationResult | undefined> {
+  private async runFinishFlow(
+    msg: InboundMessage,
+    taskId: string,
+    options?: { completeTask?: boolean }
+  ): Promise<OperationResult | undefined> {
     const { board, git, getConfig } = this.deps;
     const cfg = getConfig();
+    const completeTask = options?.completeTask ?? true;
     const task = board.getBoard().tasks.find((t) => t.id === taskId);
     if (!task) {
       return undefined;
@@ -1429,20 +1434,35 @@ export class WebviewController {
       confirm: (m, detail) => this.confirmGit(m, detail),
       info: (m) => Logger.info(`[finish] ${m}`),
     });
-    if (result.ok && result.moveToColumnId) {
+    let replyResult: OperationResult = result;
+    if (result.ok && !completeTask) {
+      const remote = cfg.remoteName || "origin";
+      const main = cfg.defaultMainBranch || "main";
+      replyResult = {
+        ok: true,
+        action: result.action,
+        message:
+          cfg.language === "en"
+            ? `Merged and pushed '${task.branchName}' to ${remote}/${main}. Task stays open until you finish it manually.`
+            : `Scalono i wypchnięto '${task.branchName}' do ${remote}/${main}. Zadanie pozostaje otwarte do ręcznego zakończenia.`,
+      };
+    }
+    if (result.ok && completeTask && result.moveToColumnId) {
       const targetCol =
         result.moveToColumnId === "done" ? board.findDoneColumnId() : board.findReviewColumnId();
       await board.moveTask(task.id, targetCol, 0);
       if (result.markDone) {
         await board.updateTask(task.id, { status: "done", finishedAt: new Date().toISOString() });
-        await board.logEvent("merge_finished", { taskId: task.id, branchName: task.branchName });
-        await this.notify("merge_finished", {
-          title: t("notifMergeFinishedTitle"),
-          message: t("notifMergeFinishedBody").replace("{title}", task.title),
-          taskId: task.id,
-          branchName: task.branchName,
-          recipientUserIds: this.actionOutcomeRecipients(task),
-        });
+      }
+      await board.logEvent("merge_finished", { taskId: task.id, branchName: task.branchName });
+      await this.notify("merge_finished", {
+        title: t("notifMergeFinishedTitle"),
+        message: t("notifMergeFinishedBody").replace("{title}", task.title),
+        taskId: task.id,
+        branchName: task.branchName,
+        recipientUserIds: this.actionOutcomeRecipients(task),
+      });
+      if (result.markDone) {
         await this.notify("task_done", {
           title: t("notifTaskDoneTitle"),
           message: t("notifTaskDoneBody").replace("{title}", task.title),
@@ -1451,6 +1471,15 @@ export class WebviewController {
           recipientUserIds: this.actionOutcomeRecipients(task),
         });
       }
+    } else if (result.ok) {
+      await board.logEvent("merge_finished", { taskId: task.id, branchName: task.branchName });
+      await this.notify("merge_finished", {
+        title: t("notifMergeFinishedTitle"),
+        message: t("notifMergeFinishedBody").replace("{title}", task.title),
+        taskId: task.id,
+        branchName: task.branchName,
+        recipientUserIds: this.actionOutcomeRecipients(task),
+      });
     } else if (!result.ok) {
       await board.logEvent("merge_failed", { taskId: task.id, branchName: task.branchName });
       await this.notify("merge_failed", {
@@ -1461,10 +1490,10 @@ export class WebviewController {
         recipientUserIds: this.actionOutcomeRecipients(task),
       });
     }
-    this.reply(msg, result);
-    this.toast(result);
+    this.reply(msg, replyResult);
+    this.toast(replyResult);
     await this.postGitInfo();
-    return result;
+    return replyResult;
   }
 
   /**
@@ -1472,7 +1501,7 @@ export class WebviewController {
    *  feature    -> create or checkout the task branch
    *  review     -> push the task branch
    *  staging    -> merge the task branch into the target (dev) and push
-   *  production -> no auto-finish on move; finishing stays explicit
+   *  production -> merge/push to main, but keep the task open for manual finish
    */
   private async runStageGitActions(
     msg: InboundMessage,
@@ -1583,7 +1612,7 @@ export class WebviewController {
     }
 
     if (stage === "production") {
-      return undefined;
+      return this.runFinishFlow(msg, taskId, { completeTask: false });
     }
     return undefined;
   }
